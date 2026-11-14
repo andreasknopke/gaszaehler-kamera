@@ -18,8 +18,9 @@ Vorlagenbank und stellt Verbrauch und Kosten in einer Web-Ansicht dar
 ## Schnellstart
 
 ```bash
-git clone https://github.com/<user>/gaszaehler-kamera.git
+git clone https://github.com/andreasknopke/gaszaehler-kamera.git
 cd gaszaehler-kamera/verbrauch
+pip install -r requirements.txt          # numpy, Pillow, scipy
 cp config.beispiel.json config.json     # Kamera-URL und Tarif anpassen
 ./einrichten.sh                         # prüft Umgebung, legt Cron an, startet UI
 ```

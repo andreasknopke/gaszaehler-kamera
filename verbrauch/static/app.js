@@ -659,6 +659,12 @@ function wasserButtons() {
   });
 }
 
+// Live-Bild-Links auf den Hostnamen der Seite umstellen, damit sie auch
+// vom Handy funktionieren (die Viewer laufen auf demselben Rechner).
+document.querySelectorAll("[data-viewer]").forEach((a) => {
+  a.href = `http://${location.hostname}:${a.dataset.viewer}/`;
+});
+
 // ------------------------------------------------------------------- Laden
 
 async function laden() {

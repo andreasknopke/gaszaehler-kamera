@@ -151,3 +151,16 @@ td .tag.manuell { background: #23351f; color: #7ee787; }
 .warnung.info { background: #13273a; border-color: #245c8a; color: #a9d3ff; }
 
 footer { max-width: 1240px; margin: 0 auto; padding: 0 26px 30px; color: #5c6875; font-size: 12px; }
+
+/* Link zum Live-Kamerabild */
+.bild-link {
+  display: inline-block;
+  font-size: 13px;
+  color: #9db4cf;
+  text-decoration: none;
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+  padding: 4px 9px;
+  white-space: nowrap;
+}
+.bild-link:hover { color: #e6edf3; border-color: #4a6b8a; background: #131c27; }

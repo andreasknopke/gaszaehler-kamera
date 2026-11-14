@@ -79,6 +79,43 @@ def periodenliste(einheit, anzahl):
 KORREKTUR_QUELLEN = ("start", "manuell")
 
 
+def _periodenende(t, einheit):
+    """Erster Zeitpunkt nach t, der in der naechsten Periode liegt."""
+    d = datetime.fromtimestamp(t)
+    if einheit == "stunde":
+        e = d.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    elif einheit == "tag":
+        e = d.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    elif einheit == "monat":
+        e = (d.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+             + timedelta(days=32)).replace(day=1)
+    else:
+        e = d.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        e = e.replace(year=e.year + 1)
+    return e.timestamp()
+
+
+def perioden_anteile(t0, t1, wert, einheit):
+    """Einen Zuwachs gleichmaessig auf die Perioden verteilen, die er abdeckt.
+
+    Ohne das landet der gesamte Zuwachs seit der letzten Messung in der
+    Periode der neuen Messung - nach einer Luecke (Nacht, Ausfall) also
+    alles in einer einzigen Stunde.
+    """
+    if t1 <= t0:
+        return {periodenschluessel(t1, einheit): wert}
+    dauer = t1 - t0
+    anteile = {}
+    t = t0
+    while t < t1:
+        schluessel = periodenschluessel(t, einheit)
+        ende = min(t1, _periodenende(t, einheit))
+        anteil = wert * (ende - t) / dauer
+        anteile[schluessel] = anteile.get(schluessel, 0.0) + anteil
+        t = ende
+    return anteile
+
+
 def _deltas():
     """(zeitpunkt, verbrauch_m3) - Korrektur- und Startwerte sind Anker, kein Verbrauch."""
     con = gas.db()
@@ -97,11 +134,25 @@ def _deltas():
 
 
 def serie(einheit, anzahl, tarif):
-    """Verbrauch (m3/kWh/EUR) je Periode aus der Messreihe."""
+    """Verbrauch (m3/kWh/EUR) je Periode aus der Messreihe.
+
+    Zuwaechse werden gleichmaessig auf die Perioden verteilt, die sie
+    abdecken - nach einer Messluecke landet sonst alles in einer Stunde.
+    """
     pro_periode = {}
-    for ts, diff in _deltas():
-        schluessel = periodenschluessel(ts, einheit)
-        pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + diff
+    con = gas.db()
+    try:
+        reihe = con.execute("SELECT ts, m3, quelle FROM messungen ORDER BY ts").fetchall()
+    finally:
+        con.close()
+    vorher = None
+    for ts, m3, quelle in reihe:
+        if vorher is not None and quelle not in KORREKTUR_QUELLEN:
+            diff = m3 - vorher[1]
+            if 0 <= diff <= 5:
+                for schluessel, anteil in perioden_anteile(vorher[0], ts, diff, einheit).items():
+                    pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
+        vorher = (ts, m3)
 
     spalten = []
     for schluessel in periodenliste(einheit, anzahl):
@@ -138,12 +189,29 @@ def strom_deltas():
     return diffs
 
 
+def strom_zuwaechse():
+    """(von, bis, kWh) — Zuwaechse mit ihrem Zeitintervall."""
+    con = strom.db()
+    try:
+        reihe = con.execute("SELECT ts, kwh, quelle FROM strom ORDER BY ts").fetchall()
+    finally:
+        con.close()
+    zuwaechse, vorher = [], None
+    for ts, kwh, quelle in reihe:
+        if vorher is not None and quelle != "anker":
+            diff = kwh - vorher[1]
+            if 0 <= diff <= 100:
+                zuwaechse.append((vorher[0], ts, diff))
+        vorher = (ts, kwh)
+    return zuwaechse
+
+
 def strom_serie(einheit, anzahl, tarif):
     """Netzbezug (kWh und EUR) je Periode."""
     pro_periode = {}
-    for ts, diff in strom_deltas():
-        schluessel = periodenschluessel(ts, einheit)
-        pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + diff
+    for t0, t1, diff in strom_zuwaechse():
+        for schluessel, anteil in perioden_anteile(t0, t1, diff, einheit).items():
+            pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
     ap = float(tarif.get("arbeitspreis_ct_kwh") or 0)
     spalten = []
     for schluessel in periodenliste(einheit, anzahl):
@@ -205,12 +273,29 @@ def wasser_deltas():
     return diffs
 
 
+def wasser_zuwaechse():
+    """(von, bis, m3) — Zuwaechse mit ihrem Zeitintervall."""
+    con = wasser.db()
+    try:
+        reihe = con.execute("SELECT ts, m3, quelle FROM wasser ORDER BY ts").fetchall()
+    finally:
+        con.close()
+    zuwaechse, vorher = [], None
+    for ts, m3, quelle in reihe:
+        if vorher is not None and quelle != "anker":
+            diff = m3 - vorher[1]
+            if 0 <= diff <= 20:
+                zuwaechse.append((vorher[0], ts, diff))
+        vorher = (ts, m3)
+    return zuwaechse
+
+
 def wasser_serie(einheit, anzahl, tarif):
     """Wasserverbrauch (m3 und EUR) je Periode."""
     pro_periode = {}
-    for ts, diff in wasser_deltas():
-        schluessel = periodenschluessel(ts, einheit)
-        pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + diff
+    for t0, t1, diff in wasser_zuwaechse():
+        for schluessel, anteil in perioden_anteile(t0, t1, diff, einheit).items():
+            pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
     preis = (float(tarif.get("wasserpreis_eur_m3") or 0)
              + float(tarif.get("abwasser_eur_m3") or 0))
     spalten = []

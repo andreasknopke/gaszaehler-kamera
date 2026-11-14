@@ -75,13 +75,15 @@ def stand_aus_broker(cfg=None, thema=None, timeout=12):
 
 
 def sammeln(cfg=None, erzwingen=False, mindestabstand=600):
-    """Einmal messen und ablegen. Liefert (ts, kwh, neu)."""
+    """Einmal messen und ablegen. Liefert (ts, kwh, neu).
+
+    Es wird *immer* gespeichert, auch wenn der Zaehler unveraendert ist:
+    Nur so ist der Zeitpunkt jeder Messung bekannt und die Stundenwerte
+    lassen sich sauber zuordnen. Sonst entstehen Luecken, nach denen der
+    gesamte Zuwachs in einer einzigen Stunde landet.
+    """
     cfg = cfg or gas.load_config()
     _thema, kwh = stand_aus_broker(cfg)
-    ts_alt, kwh_alt = letzte()
     jetzt = int(time.time())
-    if (not erzwingen and kwh_alt is not None
-            and abs(kwh - kwh_alt) < 1e-9 and jetzt - (ts_alt or 0) < mindestabstand):
-        return ts_alt, kwh_alt, False
     speichere(jetzt, kwh, "mqtt")
     return jetzt, kwh, True

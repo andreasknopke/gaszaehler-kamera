@@ -172,11 +172,12 @@ def serie(einheit, anzahl, tarif):
 
 # ------------------------------------------------------- Strom (Netzbezug)
 
-def strom_deltas():
+def strom_deltas(art="netz"):
     """(zeitpunkt, kWh) — Ankerpunkte zaehlen nicht als Verbrauch."""
-    con = strom.db()
+    con = strom.db(art)
     try:
-        reihe = con.execute("SELECT ts, kwh, quelle FROM strom ORDER BY ts").fetchall()
+        reihe = con.execute(
+            f"SELECT ts, kwh, quelle FROM {strom.tabelle(art)} ORDER BY ts").fetchall()
     finally:
         con.close()
     diffs, vorher = [], None
@@ -189,11 +190,12 @@ def strom_deltas():
     return diffs
 
 
-def strom_zuwaechse():
+def strom_zuwaechse(art="netz"):
     """(von, bis, kWh) — Zuwaechse mit ihrem Zeitintervall."""
-    con = strom.db()
+    con = strom.db(art)
     try:
-        reihe = con.execute("SELECT ts, kwh, quelle FROM strom ORDER BY ts").fetchall()
+        reihe = con.execute(
+            f"SELECT ts, kwh, quelle FROM {strom.tabelle(art)} ORDER BY ts").fetchall()
     finally:
         con.close()
     zuwaechse, vorher = [], None
@@ -206,10 +208,10 @@ def strom_zuwaechse():
     return zuwaechse
 
 
-def strom_serie(einheit, anzahl, tarif):
-    """Netzbezug (kWh und EUR) je Periode."""
+def strom_serie(einheit, anzahl, tarif, art="netz"):
+    """Netzbezug bzw. Hausverbrauch (kWh und EUR) je Periode."""
     pro_periode = {}
-    for t0, t1, diff in strom_zuwaechse():
+    for t0, t1, diff in strom_zuwaechse(art):
         for schluessel, anteil in perioden_anteile(t0, t1, diff, einheit).items():
             pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
     ap = float(tarif.get("arbeitspreis_ct_kwh") or 0)
@@ -226,10 +228,10 @@ def strom_serie(einheit, anzahl, tarif):
     return spalten
 
 
-def strom_kennzahlen(tarif):
+def strom_kennzahlen(tarif, art="netz"):
     jetzt = datetime.now()
     ap = float(tarif.get("arbeitspreis_ct_kwh") or 0)
-    deltas = strom_deltas()
+    deltas = strom_deltas(art)
     tag = monat = jahr = gesamt = 0.0
     for ts, diff in deltas:
         d = datetime.fromtimestamp(ts)
@@ -240,8 +242,9 @@ def strom_kennzahlen(tarif):
             monat += diff
         if d.year == jetzt.year:
             jahr += diff
-    ts_letzte, stand = strom.letzte()
+    ts_letzte, stand = strom.letzte(art)
     return {
+        "art": art,
         "stand_kwh": round(stand, 2) if stand is not None else None,
         "stand_text": (datetime.fromtimestamp(ts_letzte).strftime("%d.%m. %H:%M")
                        if ts_letzte else None),
@@ -561,12 +564,16 @@ class Handler(BaseHTTPRequestHandler):
             einheit = (frage.get("einheit", ["tag"])[0]).lower()
             if einheit not in EINHEITEN:
                 einheit = "tag"
+            art = (frage.get("art", ["netz"])[0]).lower()
+            if art not in strom.ARTEN:
+                art = "netz"
             anzahl = int(frage.get("anzahl", [EINHEITEN[einheit]["anzahl"]])[0])
             tarif_s = (cfg.get("strom") or {}).get("tarif") or {}
             return self._json({
                 "einheit": einheit,
-                "spalten": strom_serie(einheit, anzahl, tarif_s),
-                "kennzahlen": strom_kennzahlen(tarif_s),
+                "art": art,
+                "spalten": strom_serie(einheit, anzahl, tarif_s, art),
+                "kennzahlen": strom_kennzahlen(tarif_s, art),
                 "tarif": tarif_s,
             })
         if url.path == "/api/stromtarif":

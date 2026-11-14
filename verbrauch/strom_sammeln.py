@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Netzbezug des Wechselrichters erfassen (fuer Cron).
+"""Stromkennzahlen des Wechselrichters erfassen (fuer Cron).
 
-    python3 strom_sammeln.py            # Stand ablegen
+    python3 strom_sammeln.py            # Netzbezug und Hausverbrauch ablegen
     python3 strom_sammeln.py --zeigen   # nur anzeigen
     python3 strom_sammeln.py --anker    # Tagesbeginn aus den Zaehlerstaenden setzen
 """
@@ -23,20 +23,22 @@ def main():
     cfg = gas.load_config()
 
     if a.zeigen:
-        thema, kwh = strom.stand_aus_broker(cfg)
-        print(f"{thema} = {kwh:.3f} kWh")
+        for art in strom.ARTEN:
+            thema, kwh = strom.stand_aus_broker(cfg, art=art)
+            print(f"{art:5s} {thema} = {kwh:.3f} kWh")
         return 0
 
     if a.anker:
-        _t, gesamt = strom.stand_aus_broker(cfg, thema="sofar_hyd/bezug_gesamt")
-        _t2, heute = strom.stand_aus_broker(cfg, thema="sofar_hyd/bezug_heute")
         mitternacht = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        strom.anker_setzen(gesamt - heute, ts=int(mitternacht.timestamp()))
-        print(f"Anker: {gesamt - heute:.2f} kWh um {mitternacht:%d.%m.%Y %H:%M} "
-              f"(gesamt {gesamt:.2f} - heute {heute:.2f})")
+        for art in strom.ARTEN:
+            _t, gesamt = strom.stand_aus_broker(cfg, art=art)
+            _t2, heute = strom.stand_aus_broker(cfg, thema_=strom.thema_heute(art), art=art)
+            strom.anker_setzen(gesamt - heute, ts=int(mitternacht.timestamp()), art=art)
+            print(f"Anker {art:5s}: {gesamt - heute:8.2f} kWh um {mitternacht:%d.%m.%Y %H:%M} "
+                  f"(gesamt {gesamt:.2f} - heute {heute:.2f})")
 
-    ts, kwh, neu = strom.sammeln(cfg)
-    print(("gespeichert" if neu else "unveraendert") + f": {kwh:.3f} kWh")
+    for art, (ts, kwh, neu) in strom.sammeln_alle(cfg).items():
+        print(f"gespeichert {art:5s}: {kwh:.3f} kWh")
     return 0
 
 

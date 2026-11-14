@@ -285,7 +285,11 @@ function detailZeigen(daten) {
 
 // ------------------------------------------------------- Strom (Netzbezug)
 
-const stromZustand = { einheit: "tag", metrik: "kwh", anzahl: "" };
+const stromZustand = { einheit: "tag", metrik: "kwh", anzahl: "", art: "netz" };
+const STROM_ARTEN = {
+  netz: { titel: "Strombezug aus dem Netz", kurz: "Netzbezug", gesamt: "Netzbezug gesamt" },
+  haus: { titel: "Hausverbrauch (Lastbezug)", kurz: "Hausverbrauch", gesamt: "Hausverbrauch gesamt" },
+};
 const STROM_BEZEICHNUNG = { stunde: "pro Stunde", tag: "pro Tag", monat: "pro Monat", jahr: "pro Jahr" };
 
 function stromChartZeichnen(spalten, metrik) {
@@ -360,12 +364,13 @@ function stromChartZeichnen(spalten, metrik) {
       kurzBeschriftung(s.periode, stromZustand.einheit), { "text-anchor": "middle" }));
   });
 
+  const beschriftung = STROM_ARTEN[stromZustand.art] || STROM_ARTEN.netz;
   const sumKwh = spalten.reduce((a, s) => a + s.kwh, 0);
   const sumEur = spalten.reduce((a, s) => a + s.gesamt_eur, 0);
-  $("#stromTitel").textContent = `Strombezug aus dem Netz ${STROM_BEZEICHNUNG[stromZustand.einheit]} · `
+  $("#stromTitel").textContent = `${beschriftung.titel} ${STROM_BEZEICHNUNG[stromZustand.einheit]} · `
     + (met === "kwh" ? "Kilowattstunden" : "Kosten");
   $("#stromLegende").innerHTML =
-    `<span><i style="background:#1f6feb"></i>Netzbezug</span>` +
+    `<span><i style="background:#1f6feb"></i>${beschriftung.kurz}</span>` +
     `<span><i style="background:#58a6ff"></i>Summe Zeitraum: ` +
     `<b style="color:#58a6ff">${DE(sumKwh, 2)} kWh · ${EUR(sumEur)}</b></span>`;
 }
@@ -374,7 +379,7 @@ function stromTooltipZeigen(e, s) {
   const t = $("#stromTooltip");
   t.innerHTML =
     `<b>${periodeLang(s.periode)}</b><br>` +
-    `Netzbezug: <b>${DE(s.kwh, 2)} kWh</b><br>` +
+    `${(STROM_ARTEN[stromZustand.art] || STROM_ARTEN.netz).kurz}: <b>${DE(s.kwh, 2)} kWh</b><br>` +
     `Arbeitspreis: <b>${EUR(s.eur)}</b><br>` +
     `+ Grundpreis: ${EUR(s.gesamt_eur - s.eur)}<br>` +
     `gesamt: <b>${EUR(s.gesamt_eur)}</b>`;
@@ -427,7 +432,7 @@ function stromKartenZeigen(k, tarif) {
   const alter = k.alter_sekunden == null ? "" :
     ` · vor ${Math.round(k.alter_sekunden / 60)} min`;
   box.innerHTML = [
-    karte("Netzbezug gesamt", DE(k.stand_kwh, 1) + " kWh", `Zählerstand ${k.stand_text || "–"}${alter}`),
+    karte((STROM_ARTEN[stromZustand.art] || STROM_ARTEN.netz).gesamt, DE(k.stand_kwh, 1) + " kWh", `Zählerstand ${k.stand_text || "–"}${alter}`),
     karte("Heute", DE(k.tag_kwh, 2) + " kWh", EUR(k.tag_eur) + " Arbeitspreis"),
     karte("Dieser Monat", DE(k.monat_kwh, 1) + " kWh", EUR(k.monat_eur)),
     karte("Dieses Jahr", DE(k.jahr_kwh, 1) + " kWh", EUR(k.jahr_eur)),
@@ -435,7 +440,7 @@ function stromKartenZeigen(k, tarif) {
 }
 
 async function stromLaden() {
-  const url = `/api/strom?einheit=${stromZustand.einheit}`
+  const url = `/api/strom?einheit=${stromZustand.einheit}&art=${stromZustand.art}`
     + (stromZustand.anzahl ? `&anzahl=${stromZustand.anzahl}` : "");
   const antwort = await fetch(url);
   const d = await antwort.json();
@@ -705,6 +710,13 @@ function stromButtons() {
     const b = e.target.closest("button"); if (!b) return;
     stromZustand.einheit = b.dataset.e; stromZustand.anzahl = "";
     const sa = $("#stromAnzahl"); if (sa) sa.value = "";
+    [...e.currentTarget.children].forEach((x) => x.classList.toggle("aktiv", x === b));
+    stromLaden();
+  });
+  const sa_art = $("#stromArt");
+  if (sa_art) sa_art.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    stromZustand.art = b.dataset.a;
     [...e.currentTarget.children].forEach((x) => x.classList.toggle("aktiv", x === b));
     stromLaden();
   });

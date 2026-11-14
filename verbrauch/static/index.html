@@ -70,6 +70,53 @@
     <div class="tooltip versteckt" id="tooltip"></div>
   </section>
 
+  <!-- Strombezug aus dem Netz -->
+    <section class="panel" id="stromPanel">
+      <div class="panelkopf">
+        <h2 id="stromTitel">Strombezug aus dem Netz</h2>
+        <div class="steuerung">
+          <div class="segment" id="stromEinheit">
+            <button data-e="stunde">Stündlich</button>
+            <button data-e="tag" class="aktiv">Täglich</button>
+            <button data-e="monat">Monatlich</button>
+            <button data-e="jahr">Jährlich</button>
+          </div>
+          <div class="segment" id="stromMetrik">
+            <button data-m="kwh" class="aktiv">kWh</button>
+            <button data-m="eur">€</button>
+          </div>
+          <select id="stromAnzahl">
+            <option value="">Standard</option>
+            <option value="12">12</option>
+            <option value="24">24</option>
+            <option value="31">31</option>
+            <option value="48">48</option>
+            <option value="90">90</option>
+            <option value="365">365</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="karten" id="stromKarten"></div>
+
+      <div class="diagramm">
+        <svg id="stromChart" viewBox="0 0 1000 340" preserveAspectRatio="none"></svg>
+        <div class="legende" id="stromLegende"></div>
+      </div>
+      <div class="tooltip versteckt" id="stromTooltip"></div>
+
+      <div class="panelkopf" style="margin-top:18px">
+        <h2>Stromtarif <span class="tarif-badge offen" id="stromStand">Beispielwerte</span></h2>
+      </div>
+      <form id="stromTarifForm" class="formular"></form>
+      <p class="fuSS">Netzbezug gemessen am Hausanschluss (Wechselrichter Sofar HYD 10KTL-3PH),
+        erfasst alle 5 Minuten. Arbeitspreis und Grundpreis sind Beispielwerte passend zu einem
+        Vattenfall-Tarif — bitte mit den Zahlen aus der eigenen Vertragsbestätigung überschreiben;
+        erst dann stimmen die Kosten. Die kWh-Werte selbst sind davon unabhängig korrekt.</p>
+    </section>
+
+    
+
   <!-- Foto + Messungen -->
   <section class="zweispaltig">
     <div class="panel">

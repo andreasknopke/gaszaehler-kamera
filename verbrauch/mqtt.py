@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Minimaler MQTT-Client — nur so viel, wie fuer Home-Assistant-Discovery noetig ist.
 
-Bewusst ohne externe Abhaengigkeit: Verbinden (CONNECT) und Veroeffentlichen
-(PUBLISH, QoS 0, optional retained). Kein Abonnieren, keine Wiederholungen.
+Bewusst ohne externe Abhaengigkeit: Verbinden (CONNECT), Veroeffentlichen
+(PUBLISH, QoS 0, optional retained) und Lesen einer retained Nachricht
+(SUBSCRIBE + PUBLISH, QoS 0). Keine Wiederholungen, kein QoS-Fluss.
 Fuer regelmaessig gesendete Messwerte reicht das: Faellt der Broker aus, wird
 beim naechsten Messlauf einfach erneut gesendet.
 """
 
 import socket
 import struct
+import time
 
 
 def _varint(zahl):
@@ -78,6 +80,51 @@ class MqttClient:
         nutzlast = _text(thema) + daten
         kopf = 0x30 | (0x01 if behalten else 0x00)     # PUBLISH, QoS 0
         self.sock.sendall(bytes([kopf]) + _varint(len(nutzlast)) + nutzlast)
+
+    # ------------------------------------------------------------------ Abonnieren
+    def _lies_bytes(self, anzahl, ende):
+        daten = b""
+        while len(daten) < anzahl:
+            rest = ende - time.time()
+            if rest <= 0:
+                raise TimeoutError("keine Nachricht innerhalb der Frist")
+            self.sock.settimeout(rest)
+            teil = self.sock.recv(anzahl - len(daten))
+            if not teil:
+                raise ConnectionError("Broker hat die Verbindung geschlossen")
+            daten += teil
+        return daten
+
+    def abonnieren(self, thema):
+        nutzlast = struct.pack("!H", 1) + _text(thema) + bytes([0])
+        self.sock.sendall(bytes([0x82]) + _varint(len(nutzlast)) + nutzlast)
+
+    def lesen(self, thema, timeout=None):
+        """Abonnieren und auf die naechste (ggf. retained) Nachricht warten."""
+        if not self.sock:
+            self.verbinden()
+        self.abonnieren(thema)
+        ende = time.time() + (timeout or self.timeout)
+        while True:
+            kopf = self._lies_bytes(1, ende)[0]
+            laenge, mult = 0, 1
+            while True:
+                byte = self._lies_bytes(1, ende)[0]
+                laenge += (byte & 0x7F) * mult
+                if not byte & 0x80:
+                    break
+                mult *= 128
+            rumpf = self._lies_bytes(laenge, ende)
+            if kopf >> 4 != 3:                       # kein PUBLISH (z. B. SUBACK)
+                continue
+            themenlaenge = struct.unpack("!H", rumpf[:2])[0]
+            empfangen = rumpf[2:2 + themenlaenge].decode("utf-8")
+            qos = (kopf >> 1) & 0x03
+            rest = rumpf[2 + themenlaenge:]
+            if qos:                                  # Paket-ID bei QoS > 0
+                rest = rest[2:]
+            if empfangen == thema:
+                return rest.decode("utf-8", "replace")
 
     # ------------------------------------------------------------------ Abbau
     def trennen(self):

@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import gas
+import strom
 
 BASE = Path(__file__).resolve().parent
 PORT = 8077
@@ -116,6 +117,72 @@ def serie(einheit, anzahl, tarif):
         })
     return spalten
 
+
+# ------------------------------------------------------- Strom (Netzbezug)
+
+def strom_deltas():
+    """(zeitpunkt, kWh) — Ankerpunkte zaehlen nicht als Verbrauch."""
+    con = strom.db()
+    try:
+        reihe = con.execute("SELECT ts, kwh, quelle FROM strom ORDER BY ts").fetchall()
+    finally:
+        con.close()
+    diffs, vorher = [], None
+    for ts, kwh, quelle in reihe:
+        if vorher is not None and quelle != "anker":
+            diff = kwh - vorher[1]
+            if 0 <= diff <= 100:                    # Zaehlerspruenge verwerfen
+                diffs.append((ts, diff))
+        vorher = (ts, kwh)
+    return diffs
+
+
+def strom_serie(einheit, anzahl, tarif):
+    """Netzbezug (kWh und EUR) je Periode."""
+    pro_periode = {}
+    for ts, diff in strom_deltas():
+        schluessel = periodenschluessel(ts, einheit)
+        pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + diff
+    ap = float(tarif.get("arbeitspreis_ct_kwh") or 0)
+    spalten = []
+    for schluessel in periodenliste(einheit, anzahl):
+        kwh = round(pro_periode.get(schluessel, 0.0), 3)
+        std = EINHEITEN[einheit]["std_pro_strich"]
+        spalten.append({
+            "periode": schluessel,
+            "kwh": kwh,
+            "eur": round(kwh * ap / 100, 2),
+            "gesamt_eur": round(kwh * ap / 100 + gas.grundkosten(std, tarif), 2),
+        })
+    return spalten
+
+
+def strom_kennzahlen(tarif):
+    jetzt = datetime.now()
+    ap = float(tarif.get("arbeitspreis_ct_kwh") or 0)
+    deltas = strom_deltas()
+    tag = monat = jahr = gesamt = 0.0
+    for ts, diff in deltas:
+        d = datetime.fromtimestamp(ts)
+        gesamt += diff
+        if d.date() == jetzt.date():
+            tag += diff
+        if (d.year, d.month) == (jetzt.year, jetzt.month):
+            monat += diff
+        if d.year == jetzt.year:
+            jahr += diff
+    ts_letzte, stand = strom.letzte()
+    return {
+        "stand_kwh": round(stand, 2) if stand is not None else None,
+        "stand_text": (datetime.fromtimestamp(ts_letzte).strftime("%d.%m. %H:%M")
+                       if ts_letzte else None),
+        "alter_sekunden": max(0, int(time.time() - ts_letzte)) if ts_letzte else None,
+        "tag_kwh": round(tag, 2), "tag_eur": round(tag * ap / 100, 2),
+        "monat_kwh": round(monat, 2), "monat_eur": round(monat * ap / 100, 2),
+        "jahr_kwh": round(jahr, 2), "jahr_eur": round(jahr * ap / 100, 2),
+        "gesamt_kwh": round(gesamt, 2),
+        "messpunkte": len(deltas),
+    }
 
 def zusammenfassung(tarif):
     """Kennzahlen fuer die Karten und die Prognosen."""
@@ -310,8 +377,26 @@ class Handler(BaseHTTPRequestHandler):
                 "basis_bestaetigt": bool(cfg["erfassung"].get("basis_bestaetigt")),
                 "bank": lernstand(),
                 "notiz": notiz_lesen(),
+                "strom": {
+                    "kennzahlen": strom_kennzahlen((cfg.get("strom") or {}).get("tarif") or {}),
+                    "tarif": (cfg.get("strom") or {}).get("tarif") or {},
+                },
                 "serverzeit": time.time(),
             })
+        if url.path == "/api/strom":
+            einheit = (frage.get("einheit", ["tag"])[0]).lower()
+            if einheit not in EINHEITEN:
+                einheit = "tag"
+            anzahl = int(frage.get("anzahl", [EINHEITEN[einheit]["anzahl"]])[0])
+            tarif_s = (cfg.get("strom") or {}).get("tarif") or {}
+            return self._json({
+                "einheit": einheit,
+                "spalten": strom_serie(einheit, anzahl, tarif_s),
+                "kennzahlen": strom_kennzahlen(tarif_s),
+                "tarif": tarif_s,
+            })
+        if url.path == "/api/stromtarif":
+            return self._json({"tarif": (cfg.get("strom") or {}).get("tarif") or {}})
         return self.send_error(404)
 
     def do_POST(self):
@@ -323,6 +408,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"fehler": "ungueltiges JSON"}, 400)
 
         cfg = gas.load_config()
+        if url.path == "/api/stromtarif":
+            strom_cfg = cfg.setdefault("strom", {})
+            t = strom_cfg.setdefault("tarif", {})
+            for feld in ("anbieter", "tarifname", "hinweis"):
+                if feld in daten:
+                    t[feld] = daten[feld]
+            for feld in ("arbeitspreis_ct_kwh", "grundpreis_eur_monat"):
+                if feld in daten:
+                    try:
+                        t[feld] = float(str(daten[feld]).replace(",", "."))
+                    except ValueError:
+                        return self._json({"fehler": f"{feld} ist keine Zahl"}, 400)
+            if "bestaetigt" in daten:
+                t["bestaetigt"] = bool(daten["bestaetigt"])
+            gas.save_config(cfg)
+            return self._json({"ok": True, "tarif": t})
         if url.path == "/api/tarif":
             for feld in ("anbieter", "tarifname", "hinweis"):
                 if feld in daten:

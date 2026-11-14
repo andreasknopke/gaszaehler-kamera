@@ -105,7 +105,8 @@ ziffern.py              Lernbank: Ziffern lesen und lernen
 sample.py               ein Messlauf Gas (per Cron alle 2 Minuten)
 strom.py                Strombezug: Datenhaltung
 strom_sammeln.py        Strombezug: Messlauf (MQTT-Abruf)
-wasser.py               Wasserzähler: Kamera-Ablesung und Zählung
+wasser.py               Wasserzähler: Ablesung und Datenhaltung
+wasser_lesen.py         Wasserzähler: Ziffernerkennung (RapidOCR, im venv)
 wasser_sammeln.py       Wasserzähler: Messlauf (per Cron alle 30 Minuten)
 lernen.py               Serienbilder aufnehmen und Ziffern nachlernen
 server.py               Web-UI + JSON-API (Port 8077)
@@ -130,11 +131,16 @@ es bereits aufrecht, der Zoom zeigt die Ziffernzeile.
 
 * Gelesen werden die **fünf Vorkommastellen** (z. B. `00007`). Die kleinen
   Zeigeruhren für die Bruchteile sind mit 17×22 Pixeln zu klein.
-* Gezählt wird die **Einerwalze**: sie springt bei jedem Kubikmeter genau eine
-  Stelle weiter, auch beim Überlauf 9 → 0. Höhere Stellen werden nur als
-  Referenzbild nachgeführt — so kann ein Übertrag nicht doppelt zählen.
-* Messung **alle 30 Minuten**. Der Zähler läuft so langsam, dass das reicht;
-  jede Änderung wird dabei sicher erfasst.
+* Gelesen wird **per OCR**, nicht per Bildvergleich: Ein Bildvergleich zählt
+  zwar zuverlässig, wenn sich eine Walze dreht — aber er zählt auch, wenn sich
+  nur die Kamera minimal verschiebt. Bei einem Zähler, der sich alle paar Tage
+  ändert, bliebe so ein Fehlzähler monatelang unbemerkt.
+* Jede Ablesung wird gegen den letzten Stand geprüft: nicht kleiner und
+  höchstens ein paar Kubikmeter mehr. Passt sie nicht, bleibt der alte Wert
+  stehen und es erscheint ein Hinweis — geraten wird nicht.
+* Stellen unter Reflexen auf dem Glas werden nicht erkannt; sie werden aus
+  dem letzten Stand übernommen (die führende 0 ändert sich jahrelang nicht).
+* Messung **alle 30 Minuten**. Der Zähler läuft so langsam, dass das reicht.
 * Einmalig den Stand eintragen (`python3 wasser_sammeln.py --anker 7`) oder
   in der Web-Ansicht unter *Wasserzähler korrigieren*.
 

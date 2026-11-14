@@ -28,16 +28,17 @@ def main():
         return 0
 
     if a.zeigen:
-        zellen = wasser.zellen_aus(wasser.bild())
-        wert = wasser.basiswert(wasser.db())
-        print(f"Basiswert: {wasser.ablesung_text(wert) if wert else '—'}")
-        for i, z in enumerate(zellen):
-            ref = wasser.lade(i)
-            sim = wasser._aehnlichkeit(z, ref) if ref is not None else None
-            print(f"  Zelle {i}: " + (f"Ähnlichkeit {sim:.3f}" if sim is not None else "keine Referenz"))
+        con = wasser.db()
+        basis = wasser.basiswert(con)
+        con.close()
+        print(f"Basiswert: {wasser.ablesung_text(basis) if basis else '—'}")
+        wert, ziffern, scores, hinweis = wasser.stand_lesen(bisher=basis)
+        print(f"  gelesen: {ziffern}  Konfidenz {[round(s,2) for s in scores]}"
+              f"  → {wasser.ablesung_text(wert) if wert is not None else '—'}"
+              + (f"  ({hinweis})" if hinweis else ""))
         return 0
 
-    wert, delta, details, neu = wasser.sammeln()
+    wert, delta, hinweis, neu = wasser.sammeln()
 
     # Home Assistant (MQTT-Discovery) - darf die Messung nie stoeren
     try:
@@ -49,10 +50,9 @@ def main():
         print("MQTT:", repr(exc))
 
     print(f"{wasser.ablesung_text(wert)} m3"
-          f"{' (+' + str(delta) + ')' if delta else ''}"
-          f"{'' if neu else ' (unverändert)'}")
-    for d in details:
-        print("  ", d)
+          f"{' (+' + str(round(delta, 3)) + ')' if delta else ''}"
+          f"{'' if neu else ' (unverändert)'}"
+          + (f"  [{hinweis}]" if hinweis else ""))
     return 0
 
 

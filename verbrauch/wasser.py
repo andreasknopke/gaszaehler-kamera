@@ -1,43 +1,32 @@
 #!/usr/bin/env python3
-"""Wasserzaehler (Kamera .44) — Erfassung und Datenhaltung.
+"""Wasserzaehler (Kamera .44) — Ablesung und Datenhaltung.
 
-Der Wasserzaehler zeigt fuenf Vorkommastellen (z. B. 00007 m3); die kleinen
-Zeigeruhren darunter sind zu klein zum Lesen. Weil der Zaehler nur sehr
-langsam laeuft (eine Stelle etwa alle paar Tage), braucht es keine
-Hochfrequenz: Es genuegt, den Stand alle halbe Stunde zu pruefen.
+Der Zaehler zeigt fuenf Vorkommastellen (00007 m3); die kleinen Zeigeruhren
+darunter sind zu klein. Gelesen wird per RapidOCR (wasser_lesen.py, laeuft im
+eigenen venv), nicht per Bildvergleich:
 
-Gezaehlt wird bewusst nur die *Einerwalze*: Sie springt bei jedem Kubikmeter
-genau eine Stelle weiter - auch beim Ueberlauf 9 -> 0. Die hoeheren Stellen
-ergeben sich aus dem Stand und werden nur als Referenzbild nachgefuehrt.
-Damit kann ein Uebertrag (00009 -> 00010) nicht doppelt gezaehlt werden.
+Ein Bildvergleich zaehlt zwar zuverlaessig, wenn sich eine Walze dreht - aber
+er zaehlt auch dann, wenn sich nur die Kamera minimal verschiebt oder das
+Licht wechselt. Bei einem Zaehler, der sich nur alle paar Tage aendert, waere
+ein solcher Fehlzaehler monatelang unbemerkt. Deshalb wird der Stand direkt
+gelesen und gegen den letzten geprueft:
 
-Bildquelle ist der lokale Viewer (Port 8098), der das Bild bereits im
-Sekundentakt vom Kamerastream holt. Das Bild liegt dort um 270 Grad gedreht
-vor und wird hier in die Anzeige-Orientierung gebracht.
+* nicht kleiner als der letzte Stand
+* hoechstens ein paar Kubikmeter mehr (der Zaehler laeuft langsam)
+
+Passt die Ablesung nicht, bleibt der alte Wert stehen und es wird ein Hinweis
+gesetzt - geraten wird nicht.
 """
 
+import json
+import subprocess
+import sys
 import time
 from pathlib import Path
-
-import numpy as np
-from PIL import Image
 
 import gas
 
 BASE = Path(__file__).resolve().parent
-ZELLEN_DIR = BASE / "wasser_zellen"
-ZELLEN_DIR.mkdir(exist_ok=True)
-
-# Ziffernfenster im gedrehten Bild (720x1280): (x, y, halbe Breite, halbe Hoehe)
-ZELLEN = [
-    (178, 764, 12, 14), (205, 763, 12, 14), (231, 762, 12, 14),
-    (259, 760, 12, 14), (284, 758, 12, 14),
-]
-EINER = 4                      # Index der Einerwalze (letzte Ziffer)
-GROESSE = (32, 40)
-
-AEHNLICH = 0.90                # darunter: Ziffer hat sich geaendert
-STABIL = 0.97                  # darueber: gleiche Ziffer (nur minimal anders)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS wasser (
@@ -53,6 +42,8 @@ CREATE TABLE IF NOT EXISTS wasser_zustand (
 );
 """
 
+MAX_ANSTIEG = 5.0          # m3 seit der letzten Messung (sehr grosszuegig)
+
 
 def db():
     con = gas.db()
@@ -67,43 +58,8 @@ def bild(cfg=None):
     """Kamerabild in Anzeige-Orientierung (Ziffern waagerecht)."""
     cfg = cfg or gas.load_config()
     w = cfg.get("wasser") or {}
-    im = gas._bild_aus(w.get("url") or "http://localhost:8098/frame.jpg",
-                       int(w.get("drehen", 0)))
-    return im
-
-
-def zellen_aus(im):
-    """Fuenf normierte Zellbilder der Vorkommastellen."""
-    out = []
-    for cx, cy, hw, hh in ZELLEN:
-        c = im.crop((cx - hw, cy - hh, cx + hw, cy + hh)).resize(GROESSE, Image.LANCZOS)
-        v = np.asarray(c, dtype=np.float32)
-        out.append((v - v.mean()) / (v.std() + 1e-6))
-    return out
-
-
-def _aehnlichkeit(a, b):
-    return float((a * b).mean()) if a.shape == b.shape else -1.0
-
-
-# -------------------------------------------------------- Referenzen/Zaehlung
-
-def _pfad(i):
-    return ZELLEN_DIR / f"zelle{i}.npy"
-
-
-def lade(i):
-    p = _pfad(i)
-    return np.load(p) if p.exists() else None
-
-
-def speichere(i, arr):
-    np.save(_pfad(i), arr)
-
-
-def zuruecksetzen():
-    for datei in ZELLEN_DIR.glob("zelle*.npy"):
-        datei.unlink()
+    return gas._bild_aus(w.get("url") or "http://localhost:8098/frame.jpg",
+                         0)
 
 
 def _zustand_lesen(con, schluessel, vorgabe=None):
@@ -131,42 +87,72 @@ def notiz(con, text):
     _zustand_schreiben(con, "letzte_notiz", text)
 
 
-# -------------------------------------------------------------------- Messung
+def ablesung_text(wert):
+    """7.0 -> '00007' (so viele Vorkommastellen wie der Zaehler zeigt)."""
+    return f"{int(round(float(wert))):05d}"
 
-def schritt(zellen, con):
-    """Ein Abtastschritt. Rueckgabe: (wert, delta, details)."""
-    basis = basiswert(con)
-    if basis is None:
-        return None, 0.0, [{"hinweis": "kein Basiswert gesetzt"}]
 
-    delta, details = 0.0, []
-    for i, bild in enumerate(zellen):
-        ref = lade(i)
-        if ref is None:
-            speichere(i, bild)
-            continue
-        sim = _aehnlichkeit(bild, ref)
-        if sim >= STABIL:
-            speichere(i, bild)                  # gleiche Ziffer, langsam mitziehen
-            continue
-        if sim >= AEHNLICH:
-            # Unklarer Bereich: weder zaehlen noch die Referenz ersetzen.
-            # Die Walze dreht langsam weiter und wird beim naechsten Lauf
-            # klar als Wechsel erkannt.
-            continue
-        # Walze hat sich geaendert: nur die Einerwalze zaehlt als +1 m3.
-        if i == EINER:
-            delta += 1.0
-            details.append({"zelle": i, "delta": 1.0, "aehnlichkeit": round(sim, 3)})
+# -------------------------------------------------------------------- OCR
+
+def ocr_lesen(cfg, pfad):
+    """RapidOCR im venv aufrufen -> (ziffern, scores) oder None."""
+    o = cfg.get("ocr") or {}
+    python = Path(__import__("os").path.expanduser(
+        o.get("python", "~/.local/ocrenv/bin/python")))
+    if not python.exists():
+        return None
+    try:
+        lauf = subprocess.run([str(python), str(BASE / "wasser_lesen.py"),
+                               "--bild", str(pfad), "--json"],
+                              capture_output=True, text=True, timeout=90)
+        zeilen = [z for z in lauf.stdout.strip().splitlines() if z.startswith("{")]
+        if not zeilen:
+            return None
+        daten = json.loads(zeilen[-1])
+    except Exception:
+        return None
+    ziffern = daten.get("ziffern") or []
+    if len(ziffern) != 5:
+        return None
+    return ziffern, daten.get("scores") or []
+
+
+def stand_lesen(cfg=None, bisher=None):
+    """Bild holen, Ziffern lesen, mit dem bisherigen Stand ergaenzen.
+
+    -> (wert, ziffern, scores, hinweis)
+    """
+    cfg = cfg or gas.load_config()
+    bild_pfad = Path("/tmp/wasser_ablesung.jpg")
+    bild(cfg).save(bild_pfad, quality=92)
+    ergebnis = ocr_lesen(cfg, bild_pfad)
+    if not ergebnis:
+        return None, [None] * 5, [], "OCR nicht verfuegbar"
+    ziffern, scores = ergebnis
+
+    # Nur sichere Ziffern uebernehmen. Die fuehrenden Stellen liegen oft
+    # unter Reflexen auf dem Glas; sie aendern sich jahrelang nicht und
+    # werden aus dem bisherigen Stand ergaenzt.
+    if bisher is not None:
+        alt = [int(c) for c in ablesung_text(bisher)]
+    else:
+        alt = [0, 0, 0, 0, 0]
+    gefuellt, uebernommen = [], []
+    for a, z, s in zip(alt, ziffern, scores or [0] * 5):
+        if z is not None and s >= 0.50:
+            gefuellt.append(z)
         else:
-            details.append({"zelle": i, "delta": 0.0, "aehnlichkeit": round(sim, 3),
-                            "hinweis": "Uebertrag - zaehlt ueber die Einerwalze"})
-        speichere(i, bild)
+            gefuellt.append(a)
+            uebernommen.append(z)
+    wert = float("".join(str(z) for z in gefuellt))
+    hinweis = ""
+    if uebernommen:
+        hinweis = (f"{len(uebernommen)} unsichere Stelle(n) aus dem letzten "
+                   f"Stand uebernommen")
+    return wert, ziffern, scores, hinweis
 
-    if delta:
-        setze_basiswert(con, basis + delta)
-    return basis + delta, delta, details
 
+# -------------------------------------------------------------------- Messung
 
 def letzte():
     con = db()
@@ -188,40 +174,46 @@ def speichere_messung(ts, m3, quelle, ablesung=None, konfidenz=None):
         con.close()
 
 
+def sammeln(cfg=None, erzwingen=False):
+    """Einmal lesen und pruefen. -> (wert, delta, hinweis, neu)"""
+    cfg = cfg or gas.load_config()
+    con = db()
+    try:
+        basis = basiswert(con)
+        ts_letzte, m3_letzte = letzte()
+        bisher = m3_letzte if m3_letzte is not None else basis
+        wert, ziffern, scores, hinweis = stand_lesen(cfg, bisher)
+
+        if wert is None:
+            notiz(con, f"{time.strftime('%H:%M')} Wasser: {hinweis}")
+            return (bisher or 0.0), 0.0, hinweis, False
+
+        schnitt = (sum(s for s in scores if s) / max(1, sum(1 for s in scores if s)))
+        delta = wert - (bisher if bisher is not None else wert)
+        if bisher is not None and (delta < 0 or delta > MAX_ANSTIEG):
+            notiz(con, f"{time.strftime('%H:%M')} Wasser-Ablesung "
+                       f"{ablesung_text(wert)} passt nicht zum letzten Stand "
+                       f"{ablesung_text(bisher)} - bitte pruefen")
+            return bisher, 0.0, "Ablesung unplausibel", False
+
+        jetzt = int(time.time())
+        neu = (erzwingen or delta != 0 or m3_letzte is None
+               or jetzt - (ts_letzte or 0) > 3600)
+        if neu:
+            speichere_messung(jetzt, wert, "ocr", ablesung_text(wert),
+                              round(schnitt, 3))
+            setze_basiswert(con, wert)
+        return wert, delta, hinweis, neu
+    finally:
+        con.close()
+
+
 def anker_setzen(wert, ts=None, quelle="anker"):
-    """Startpunkt setzen und Referenzbilder neu aufnehmen."""
+    """Startpunkt setzen (z. B. vom Display abgelesen)."""
     con = db()
     try:
         setze_basiswert(con, wert)
-        speichere_messung(int(ts or time.time()), wert, quelle, ablesung_text(wert))
+        speichere_messung(int(ts or time.time()), wert, quelle, ablesung_text(wert), 1.0)
     finally:
         con.close()
-    zuruecksetzen()
-    for i, z in enumerate(zellen_aus(bild())):
-        speichere(i, z)
     return wert
-
-
-def ablesung_text(wert):
-    """7.0 -> '00007' (so viele Vorkommastellen wie der Zaehler zeigt)."""
-    return f"{int(round(float(wert))):05d}"
-
-
-def sammeln(cfg=None, erzwingen=False):
-    """Einmal messen. Rueckgabe: (wert, delta, details, neu)."""
-    con = db()
-    try:
-        if basiswert(con) is None:
-            raise RuntimeError("kein Basiswert - erst mit --anker setzen")
-        zellen = zellen_aus(bild(cfg))
-        wert, delta, details = schritt(zellen, con)
-        ts_letzte, m3_letzte = letzte()
-        jetzt = int(time.time())
-        neu = (erzwingen or delta > 0 or m3_letzte is None
-               or abs(m3_letzte - wert) > 1e-6
-               or jetzt - (ts_letzte or 0) > 3600)
-        if neu:
-            speichere_messung(jetzt, wert, "zaehlung", ablesung_text(wert))
-        return wert, delta, details, neu
-    finally:
-        con.close()

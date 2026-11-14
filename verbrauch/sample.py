@@ -53,6 +53,23 @@ def haupt_ocr():
         return ""
 
 
+def ablesung_aus_wert(wert):
+    """Ziffernfolge zum gespeicherten Wert.
+
+    So viele Nachkommastellen wie der Wert wirklich hat, der Rest als '-'.
+    8505.0 -> 08505,0--   8505.04 -> 08505,04-   8505.042 -> 08505,042
+    """
+    wert = round(float(wert), 3)
+    ziffern_liste = ziffern.ziffern_aus_wert(wert)
+    text = f"{wert:.3f}".rstrip("0")
+    stellen = len(text.split(".")[1]) if "." in text else 0
+    gewichte = [10000, 1000, 100, 10, 1, 0.1, 0.01, 0.001]
+    for i, g in enumerate(gewichte):
+        if 5 + stellen <= i:
+            ziffern_liste[i] = None
+    return ziffern.text(ziffern_liste)
+
+
 def ocr_ablesung(cfg):
     """RapidOCR als Rueckfallebene, wenn die Lernbank unsicher ist.
 
@@ -206,6 +223,11 @@ def main():
                 haupt = haupt_ocr()
                 if haupt:
                     roh = f"OCR {haupt} | " + roh
+
+            # Die Anzeige wird immer aus dem gespeicherten Wert gebildet -
+            # so kann sie ihm nie widersprechen (vorher stand dort nach einem
+            # gescheiterten OCR-Lauf noch die alte Bank-Ablesung).
+            ablesung = ablesung_aus_wert(wert)
 
             gas.speichere_messung(time.time(), wert, quelle,
                                   0.95 if quelle == "ablesung" else 0.7, roh, ablesung)

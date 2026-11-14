@@ -40,6 +40,13 @@ eine Stelle weiter, und die neue Ziffer ist damit bekannt (alte + 1). So baut
 sich die Vorlagenbank selbst auf. Gezählt wird nur, wenn ein zweites Bild
 wenige Sekunden später bestätigt, dass die Walze fertig gedreht hat.
 
+## Home Assistant
+
+Der Zähler lässt sich als Gerät einbinden: per **MQTT-Discovery** (erscheint
+automatisch mit allen Entitäten) oder per **REST-Sensor** (ohne Broker).
+Beides ist in [verbrauch/README.md](verbrauch/README.md#home-assistant)
+beschrieben.
+
 ## Lizenz
 
 MIT — siehe [LICENSE](LICENSE).

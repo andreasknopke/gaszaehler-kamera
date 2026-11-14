@@ -145,6 +145,14 @@ def main():
             log(f"{wert:.3f} ({quelle}) abgelesen={ablesung}",
                 f"wechsel={wechsel}" if wechsel else "")
 
+            # Home Assistant (MQTT-Discovery) - darf die Messung nie stoeren
+            if (cfg.get("mqtt") or {}).get("aktiv"):
+                try:
+                    import mqtt_bruecke
+                    mqtt_bruecke.sende(cfg)
+                except Exception as exc:
+                    log("MQTT-Fehler:", repr(exc))
+
             if foto_noetig():
                 stempel = datetime.now().strftime("%Y%m%d-%H%M")
                 im.save(FOTO_DIR / f"zaehler-{stempel}.jpg", quality=85)

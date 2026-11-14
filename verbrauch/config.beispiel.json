@@ -21,5 +21,14 @@
     "startwert_m3": 0.0,
     "foto_archiv_tage": 3,
     "basis_bestaetigt": false
+  },
+  "mqtt": {
+    "aktiv": false,
+    "host": "192.168.188.10",
+    "port": 1883,
+    "benutzer": "",
+    "passwort": "",
+    "basis": "gaszaehler",
+    "entdeckung": "homeassistant"
   }
 }

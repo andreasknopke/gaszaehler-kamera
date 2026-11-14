@@ -272,6 +272,29 @@ class Handler(BaseHTTPRequestHandler):
             typ = "image/png" if name.lower().endswith(".png") else "image/jpeg"
             return self._datei(BASE / "fotos" / name, typ)
 
+        if url.path == "/api/homeassistant":
+            # Flaches JSON fuer Home-Assistant-REST-Sensoren und Skripte.
+            k = zusammenfassung(tarif)
+            if not k:
+                return self._json({"fehler": "keine Messwerte"}, 503)
+            ts = k.get("stand_ts", time.time())
+            return self._json({
+                "zaehlerstand_m3": k["stand"],
+                "ablesung": k.get("ablesung", ""),
+                "verbrauch_heute_m3": k.get("tag_m3"),
+                "verbrauch_woche_m3": k.get("woche_m3"),
+                "verbrauch_monat_m3": k.get("monat_m3"),
+                "verbrauch_jahr_m3": k.get("jahr_m3"),
+                "verbrauch_stunde_m3": k.get("pro_stunde_m3"),
+                "kosten_heute_eur": k.get("tag_eur"),
+                "kosten_monat_eur": k.get("monat_eur"),
+                "kosten_jahr_eur": k.get("jahr_eur"),
+                "letzte_messung": datetime.fromtimestamp(ts).astimezone()
+                                  .isoformat(timespec="seconds"),
+                "alter_sekunden": max(0, int(time.time() - ts)),
+                "tarif_bestaetigt": bool(tarif.get("bestaetigt")),
+            })
+
         if url.path == "/api/uebersicht":
             einheit = (frage.get("einheit", ["tag"])[0]).lower()
             if einheit not in EINHEITEN:

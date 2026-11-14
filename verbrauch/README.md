@@ -90,6 +90,8 @@ ziffern.py              Lernbank: Ziffern lesen und lernen
 sample.py               ein Messlauf (per Cron alle 5 Minuten)
 lernen.py               Serienbilder aufnehmen und Ziffern nachlernen
 server.py               Web-UI + JSON-API (Port 8077)
+mqtt.py                 minimaler MQTT-Client (ohne Zusatzpaket)
+mqtt_bruecke.py         Messwerte an Home Assistant (MQTT-Discovery)
 startwert_ermitteln.py  Basiswert setzen / Walzen neu anlernen
 einrichten.sh           Cron-Eintrag anlegen, Umgebung prüfen
 gaszaehler.sh           Web-UI starten und Browser öffnen
@@ -116,6 +118,74 @@ Umrechnung: `kWh = m³ × Brennwert × Zustandszahl`,
 
 Solange die Platzhalter aktiv sind, zeigt die Seite ein orangefarbenes
 Warnbanner.
+
+## Home Assistant
+
+Zwei Wege — beide ohne Cloud, beide lokal.
+
+### A) MQTT-Discovery (empfohlen: erscheint als Gerät)
+
+Voraussetzung: ein MQTT-Broker, z. B. das Mosquitto-Add-on in Home Assistant.
+In `config.json` eintragen:
+
+```json
+"mqtt": {
+  "aktiv": true,
+  "host": "192.168.188.10",
+  "port": 1883,
+  "benutzer": "mqtt",
+  "passwort": "…",
+  "basis": "gaszaehler",
+  "entdeckung": "homeassistant"
+}
+```
+
+Beim nächsten Messlauf (oder sofort mit `python3 mqtt_bruecke.py`) meldet sich
+das Gerät **Gaszähler** an, mit diesen Entitäten:
+
+| Entität | Einheit | Bedeutung |
+|---|---|---|
+| Zählerstand | m³ | Gesamtstand, `total_increasing` (fürs Energie-Dashboard) |
+| Verbrauch heute / 7 / 30 / 365 Tage | m³ | rollierende Zeiträume |
+| Leistung (24 h) | m³/h | mittlerer Verbrauch |
+| Kosten heute / 30 / 365 Tage | € | inkl. anteiligem Grundpreis |
+| Ablesung laut Bild | – | gelesene Ziffern, z. B. `08503,7--` |
+| Letzte Messung, Bildalter | – / s | Diagnose |
+
+Bleiben 15 Minuten neue Werte aus, markiert Home Assistant die Entitäten als
+nicht verfügbar (`expire_after`). Der MQTT-Client ist selbst geschrieben
+(`mqtt.py`, rund 100 Zeilen) — es wird kein Zusatzpaket gebraucht.
+
+Prüfen ohne Broker: `python3 mqtt_bruecke.py --zeigen`
+
+### B) REST-Sensor (ohne Broker)
+
+`/api/homeassistant` liefert alle Werte als flaches JSON. In
+`configuration.yaml`:
+
+```yaml
+rest:
+  - resource: http://192.168.188.10:8077/api/homeassistant
+    scan_interval: 300
+    sensor:
+      - name: "Gaszähler Stand"
+        value_template: "{{ value_json.zaehlerstand_m3 }}"
+        unit_of_measurement: "m³"
+        device_class: gas
+        state_class: total_increasing
+      - name: "Gasverbrauch heute"
+        value_template: "{{ value_json.verbrauch_heute_m3 }}"
+        unit_of_measurement: "m³"
+        device_class: gas
+        state_class: measurement
+      - name: "Gaskosten heute"
+        value_template: "{{ value_json.kosten_heute_eur }}"
+        unit_of_measurement: "EUR"
+        device_class: monetary
+```
+
+Der REST-Weg erzeugt Entitäten, aber kein zusammenhängendes Gerät — dafür
+braucht es MQTT-Discovery (A) oder eine eigene Integration.
 
 ## Häufige Fälle
 

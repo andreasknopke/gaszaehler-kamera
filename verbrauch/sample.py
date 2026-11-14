@@ -107,8 +107,10 @@ def main():
             quelle = "zahlwerk"
 
             # --- 6) Ablesung gegen Zaehlung pruefen
-            # Die Ablesung ist abgeschnitten, sobald die feinen Walzen rollen:
-            # "08498,27-" heisst 8498,27 <= Wert < 8498,28.
+            # Die Ablesung ist abgeschnitten, sobald feine Walzen rollen:
+            # "08504,---" heisst 8504,0 <= Wert < 8505,0 (Aufloesung 1 m3).
+            # Auch dann muss die Ablesung die Zaehlung korrigieren duerfen -
+            # sonst bleibt ein verpasster 0,1-Schritt fuer immer stehen.
             if komplett:
                 if abs(gelesen - wert) > 0.0015:
                     tracker.setze_basiswert(con, gelesen)
@@ -117,19 +119,28 @@ def main():
                     log(f"Zaehlung korrigiert: {wert:.3f} -> {gelesen:.3f}")
                 wert = gelesen
                 quelle = "ablesung"
-            elif gelesen is not None and aufloesung <= 0.1:
-                # gelesen ist abgeschnitten: der Wert muss im Intervall
-                # [gelesen ; gelesen + aufloesung) liegen.
-                if -0.0005 <= (wert - gelesen) < aufloesung + 0.0005:
-                    quelle = "ablesung"        # Ablesung bestaetigt die Zaehlung
-                else:
-                    tracker.setze_basiswert(con, gelesen)
+            elif gelesen is not None and aufloesung <= 1.0:
+                abweichung = wert - gelesen
+                if -0.0005 <= abweichung < aufloesung + 0.0005:
+                    quelle = "ablesung"            # Ablesung bestaetigt die Zaehlung
+                elif abs(abweichung) <= max(2 * aufloesung, 1.0):
+                    # Kleine Abweichung: auf die gelesene Stelle einrasten.
+                    # (Der Rahmen max(2*A, 1 m3) laesst Korrekturen bis zu
+                    # einem ganzen Kubikmeter zu, aber keine Sprünge durch
+                    # eine fehlgelesene höhere Stelle.)
+                    neu = round(gelesen + min(max(abweichung, 0.0), aufloesung - 0.001), 3)
+                    tracker.setze_basiswert(con, neu)
                     tracker.notiz(con, f"{time.strftime('%H:%M')} Zahlwerk {wert:.3f} "
                                        f"passt nicht zur Ablesung {ablesung}; "
-                                       f"Ablesung uebernommen")
-                    log(f"Zaehlung korrigiert: {wert:.3f} -> {gelesen:.3f} ({ablesung})")
-                    wert = gelesen
+                                       f"auf {neu:.3f} korrigiert")
+                    log(f"Zaehlung korrigiert: {wert:.3f} -> {neu:.3f} ({ablesung})")
+                    wert = neu
                     quelle = "ablesung"
+                else:
+                    tracker.notiz(con, f"{time.strftime('%H:%M')} Ablesung {ablesung} "
+                                       f"weicht stark von der Zählung {wert:.3f} ab - "
+                                       f"bitte Zählerstand prüfen")
+                    log(f"Ablesung springt: {ablesung} vs {wert:.3f} - nicht uebernommen")
 
             # --- 6) Gegenprobe per Tesseract (etwa stuendlich) - nur protokollieren.
             # Auf diesem Bild ist sie zu grob fuer eine Warnung (verwechselt

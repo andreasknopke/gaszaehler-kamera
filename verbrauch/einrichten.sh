@@ -1,5 +1,5 @@
 #!/bin/bash
-# Richtet die automatische Messung ein (Cron: alle 5 Minuten) und prueft,
+# Richtet die automatische Messung ein (Cron: alle 2 Minuten) und prueft,
 # ob alles laeuft. Mehrfach ausfuehrbar (ergaenzt den Cron-Eintrag nur einmal).
 cd "$(dirname "$0")" || exit 1
 set -u
@@ -24,12 +24,12 @@ fi
 echo
 echo "== Cron-Eintrag =="
 if crontab -l 2>/dev/null | grep -q "verbrauch/sample.py"; then
-    echo "  vorhanden: */5 * * * * .../verbrauch/sample.py"
+    echo "  vorhanden: */2 * * * * .../verbrauch/sample.py"
 else
     { crontab -l 2>/dev/null
-      echo "*/5 * * * * cd $PWD && /usr/bin/python3 sample.py >> logs/cron.log 2>&1"
+      echo "*/2 * * * * cd $PWD && /usr/bin/python3 sample.py >> logs/cron.log 2>&1"
     } | crontab -
-    echo "  neu angelegt (Messung alle 5 Minuten)"
+    echo "  neu angelegt (Messung alle 2 Minuten)"
 fi
 
 echo

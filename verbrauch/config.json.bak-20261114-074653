@@ -1,0 +1,34 @@
+{
+  "kamera": {
+    "url_ansicht": "http://localhost:8099/frame.jpg",
+    "url_direkt": "http://192.168.188.43/cgi-bin/hi3510/snap.cgi?&-getstream&-chn=11",
+    "drehen": 180,
+    "drehen_ansicht": 0
+  },
+  "tarif": {
+    "anbieter": "goldgas",
+    "tarifname": "goldgas Gas (Neukunde, Abschluss 09/2026)",
+    "arbeitspreis_ct_kwh": 11.9,
+    "grundpreis_eur_monat": 9.95,
+    "brennwert_kwh_m3": 10.0,
+    "zustandszahl": 1.0,
+    "bestaetigt": false,
+    "hinweis": "Platzhalterwerte - bitte Arbeitspreis, Grundpreis, Brennwert und Zustandszahl aus der goldgas-Vertragsbestaetigung eintragen."
+  },
+  "erfassung": {
+    "intervall_sekunden": 60,
+    "max_anstieg_m3_pro_minute": 0.05,
+    "startwert_m3": 8503.6,
+    "foto_archiv_tage": 3,
+    "basis_bestaetigt": true
+  },
+  "mqtt": {
+    "aktiv": false,
+    "host": "192.168.188.10",
+    "port": 1883,
+    "benutzer": "",
+    "passwort": "",
+    "basis": "gaszaehler",
+    "entdeckung": "homeassistant"
+  }
+}

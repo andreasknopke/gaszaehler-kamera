@@ -80,6 +80,10 @@ liest das System die Stellen selbst weiter.
 * **Ein Anker pro Stelle.** Der Startwert muss einmal vom Display abgelesen
   werden; danach läuft alles automatisch. Wird die Kamera versetzt, ist ein
   neuer Anker nötig.
+* **Korrektur auf ganze m³.** Sind die Nachkommastellen im Bild nicht sicher
+  lesbar, korrigiert die Ablesung immer noch die Vorkommastellen (Auflösung
+  1 m³). Ein verpasster 0,1-Schritt kann sich dadurch nicht dauerhaft
+  festsetzen.
 
 ## Verzeichnis
 
@@ -199,7 +203,7 @@ braucht es MQTT-Discovery (A) oder eine eigene Integration.
   (Lichtwechsel, Kamera versetzt). Die Zählung läuft weiter; ein neuer
   Basiswert setzt die Bank zurück.
 * **Cron läuft nicht** – `crontab -l` muss enthalten:
-  `*/5 * * * * cd .../verbrauch && /usr/bin/python3 sample.py >> logs/cron.log 2>&1`
+  `*/2 * * * * cd .../verbrauch && /usr/bin/python3 sample.py >> logs/cron.log 2>&1`
   (Messung alle 5 Minuten – nötig, weil die 0,1‑m³‑Walze bei Verbrauch in
   unter 10 Minuten weiterspringt)
 

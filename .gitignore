@@ -1,0 +1,16 @@
+# Laufzeit- und Personendaten bleiben lokal
+__pycache__/
+*.pyc
+*.log
+.sample.lock
+
+verbrauch/config.json
+verbrauch/daten.db
+verbrauch/daten.db-*
+verbrauch/fotos/
+verbrauch/zellen/
+verbrauch/bank/
+verbrauch/logs/
+
+# alte Diagnosebilder
+/zaehler_*.png

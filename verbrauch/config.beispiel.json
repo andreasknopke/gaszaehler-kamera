@@ -1,0 +1,25 @@
+{
+  "kamera": {
+    "url_ansicht": "http://localhost:8099/frame.jpg",
+    "url_direkt": "http://192.168.188.43/cgi-bin/hi3510/snap.cgi?&-getstream&-chn=11",
+    "drehen": 180,
+    "drehen_ansicht": 0
+  },
+  "tarif": {
+    "anbieter": "",
+    "tarifname": "",
+    "arbeitspreis_ct_kwh": 0.0,
+    "grundpreis_eur_monat": 0.0,
+    "brennwert_kwh_m3": 10.0,
+    "zustandszahl": 1.0,
+    "bestaetigt": false,
+    "hinweis": "Bitte Arbeitspreis, Grundpreis, Brennwert und Zustandszahl aus der Vertragsbestaetigung eintragen."
+  },
+  "erfassung": {
+    "intervall_sekunden": 300,
+    "max_anstieg_m3_pro_minute": 0.05,
+    "startwert_m3": 0.0,
+    "foto_archiv_tage": 3,
+    "basis_bestaetigt": false
+  }
+}

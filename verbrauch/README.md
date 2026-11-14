@@ -6,6 +6,10 @@ liest die Ziffern selbst und schreibt den Zählerstand in eine SQLite‑Datenban
 Dazu gibt es eine Web‑Ansicht mit Verbrauch und Kosten — stündlich, täglich,
 monatlich, jährlich — inklusive Tarifrechnung.
 
+Auf derselben Seite stehen zwei weitere Verbraucher: der **Strombezug** aus dem
+Netz (kumulativer Zähler des Wechselrichters über MQTT) und der
+**Wasserverbrauch** (zweite Kamera am Wasserzähler).
+
 Läuft auf einem gewöhnlichen Linux‑Rechner im Dauerbetrieb, ohne root, ohne
 Cloud. Die Messung startet per Cron, die Auswertung läuft lokal im Browser.
 
@@ -98,7 +102,11 @@ liest das System die Stellen selbst weiter.
 gas.py                  Bild holen, Zählerfenster, OCR, Tarif, SQLite
 tracker.py              Ziffernräder vergleichen und zählen
 ziffern.py              Lernbank: Ziffern lesen und lernen
-sample.py               ein Messlauf (per Cron alle 5 Minuten)
+sample.py               ein Messlauf Gas (per Cron alle 2 Minuten)
+strom.py                Strombezug: Datenhaltung
+strom_sammeln.py        Strombezug: Messlauf (MQTT-Abruf)
+wasser.py               Wasserzähler: Kamera-Ablesung und Zählung
+wasser_sammeln.py       Wasserzähler: Messlauf (per Cron alle 30 Minuten)
 lernen.py               Serienbilder aufnehmen und Ziffern nachlernen
 server.py               Web-UI + JSON-API (Port 8077)
 ablesen_ocr.py          Ziffernablesung per RapidOCR (ONNX), einzeln je Walze
@@ -113,6 +121,26 @@ static/                 HTML, CSS, JavaScript der Web-Ansicht
 
 Nicht im Repo (werden zur Laufzeit angelegt): `config.json`, `daten.db`,
 `fotos/`, `zellen/`, `bank/`, `logs/`.
+
+## Wasserzähler
+
+Der Wasserzähler wird von einer zweiten Kamera (192.168.188.44, Port 8098)
+beobachtet. Das Bild steht quer und wird um 270° gedreht; der Viewer liefert
+es bereits aufrecht, der Zoom zeigt die Ziffernzeile.
+
+* Gelesen werden die **fünf Vorkommastellen** (z. B. `00007`). Die kleinen
+  Zeigeruhren für die Bruchteile sind mit 17×22 Pixeln zu klein.
+* Gezählt wird die **Einerwalze**: sie springt bei jedem Kubikmeter genau eine
+  Stelle weiter, auch beim Überlauf 9 → 0. Höhere Stellen werden nur als
+  Referenzbild nachgeführt — so kann ein Übertrag nicht doppelt zählen.
+* Messung **alle 30 Minuten**. Der Zähler läuft so langsam, dass das reicht;
+  jede Änderung wird dabei sicher erfasst.
+* Einmalig den Stand eintragen (`python3 wasser_sammeln.py --anker 7`) oder
+  in der Web-Ansicht unter *Wasserzähler korrigieren*.
+
+Der Tarif besteht aus Wasserpreis **und** Abwassergebühr je m³ plus
+Grundpreis je Monat (Felder `wasserpreis_eur_m3`, `abwasser_eur_m3`,
+`grundpreis_eur_monat`).
 
 ## Tarif
 
@@ -152,8 +180,9 @@ In `config.json` eintragen:
 }
 ```
 
-Beim nächsten Messlauf (oder sofort mit `python3 mqtt_bruecke.py`) meldet sich
-das Gerät **Gaszähler** an, mit diesen Entitäten:
+Beim nächsten Messlauf (oder sofort mit `python3 mqtt_bruecke.py`) melden sich
+zwei Geräte an: **Gaszähler** und **Wasserzähler** (jeweils `basis` bzw.
+`basis_wasser` als Themenpräfix). Entitäten des Gaszählers:
 
 | Entität | Einheit | Bedeutung |
 |---|---|---|

@@ -443,6 +443,217 @@ async function stromLaden() {
   stromChartZeichnen(d.spalten, stromZustand.metrik);
 }
 
+
+// ------------------------------------------------------------- Wasser
+
+const wasserZustand = { einheit: "tag", metrik: "m3", anzahl: "" };
+const WASSER_BEZEICHNUNG = { stunde: "pro Stunde", tag: "pro Tag", monat: "pro Monat", jahr: "pro Jahr" };
+
+function wasserChartZeichnen(spalten, metrik) {
+  const svg = $("#wasserChart");
+  if (!svg) return;
+  const met = metrik === "eur" ? "eur" : "m3";
+  const B = { x: 62, y: 18, breite: 1000 - 62 - 14, hoehe: 340 - 18 - 44 };
+  const werte = spalten.map((s) => s[met] || 0);
+  const max = Math.max(...werte, met === "m3" ? 0.1 : 0.05);
+  const stufe = schöneStufe(max);
+  const obergrenze = Math.ceil(max / stufe) * stufe;
+
+  const el = (name, attr, kinder) => {
+    const e = document.createElementNS("http://www.w3.org/2000/svg", name);
+    for (const k in attr) e.setAttribute(k, attr[k]);
+    (kinder || []).forEach((k) => e.appendChild(k));
+    return e;
+  };
+  const txt = (x, y, s, attr = {}) => {
+    const e = el("text", { x, y, fill: "#8b98a9", "font-size": 11, ...attr });
+    e.textContent = s;
+    return e;
+  };
+
+  svg.replaceChildren();
+  svg.appendChild(el("defs", {}, [
+    el("linearGradient", { id: "balkenWasser", x1: 0, y1: 0, x2: 0, y2: 1 }, [
+      el("stop", { offset: "0%", "stop-color": "#7ee2d0" }),
+      el("stop", { offset: "100%", "stop-color": "#1f9e8a", "stop-opacity": ".55" }),
+    ]),
+  ]));
+
+  const schritte = Math.round(obergrenze / stufe);
+  for (let i = 0; i <= schritte; i++) {
+    const wert = i * stufe;
+    const y = B.y + B.hoehe - (wert / obergrenze) * B.hoehe;
+    svg.appendChild(el("line", {
+      x1: B.x, x2: B.x + B.breite, y1: y, y2: y,
+      stroke: i === 0 ? "#33405a" : "#1e2836", "stroke-width": 1,
+    }));
+    svg.appendChild(txt(B.x - 9, y + 4,
+      met === "eur" ? DE(wert, 2) + " €" : DE(wert, 2) + " m³",
+      { "text-anchor": "end" }));
+  }
+
+  const n = spalten.length;
+  const slot = B.breite / n;
+  const bw = Math.max(2, Math.min(46, slot * 0.66));
+  spalten.forEach((s, i) => {
+    const wert = s[met] || 0;
+    const h = (wert / obergrenze) * B.hoehe;
+    const x = B.x + i * slot + (slot - bw) / 2;
+    const y = B.y + B.hoehe - h;
+    const balken = el("rect", {
+      x, y: h > 2 ? y : B.y + B.hoehe - 2, width: bw, height: Math.max(h, 2),
+      rx: Math.min(4, bw / 3), fill: "url(#balkenWasser)",
+    });
+    balken.style.cursor = "pointer";
+    balken.addEventListener("mouseenter", (e) => wasserTooltipZeigen(e, s));
+    balken.addEventListener("mousemove", (e) => tooltipPosition(e));
+    balken.addEventListener("mouseleave", () => $("#wasserTooltip").classList.add("versteckt"));
+    svg.appendChild(balken);
+    if (wert > 0 && h > 22) {
+      const beschriftung = met === "eur" ? DE(wert, 2) : DE(wert, 2);
+      svg.appendChild(txt(x + bw / 2, y - 5, beschriftung, {
+        "text-anchor": "middle", fill: "#e6edf3", "font-size": 10.5,
+      }));
+    }
+  });
+
+  const jedes = Math.ceil(n / 14);
+  spalten.forEach((s, i) => {
+    if (i % jedes) return;
+    svg.appendChild(txt(B.x + i * slot + slot / 2, B.y + B.hoehe + 20,
+      kurzBeschriftung(s.periode, wasserZustand.einheit), { "text-anchor": "middle" }));
+  });
+
+  const sumM3 = spalten.reduce((a, s) => a + s.m3, 0);
+  const sumEur = spalten.reduce((a, s) => a + s.gesamt_eur, 0);
+  $("#wasserTitel").textContent = `Wasserverbrauch ${WASSER_BEZEICHNUNG[wasserZustand.einheit]} · `
+    + (met === "m3" ? "Kubikmeter" : "Kosten");
+  $("#wasserLegende").innerHTML =
+    `<span><i style="background:#1f9e8a"></i>Wasser</span>` +
+    `<span><i style="background:#7ee2d0"></i>Summe Zeitraum: ` +
+    `<b style="color:#7ee2d0">${DE(sumM3, 2)} m³ · ${EUR(sumEur)}</b></span>`;
+}
+
+function wasserTooltipZeigen(e, s) {
+  const t = $("#wasserTooltip");
+  t.innerHTML =
+    `<b>${periodeLang(s.periode)}</b><br>` +
+    `Wasser: <b>${DE(s.m3, 2)} m³</b><br>` +
+    `Wasser/Abwasser: <b>${EUR(s.eur)}</b><br>` +
+    `+ Grundpreis: ${EUR(s.gesamt_eur - s.eur)}<br>` +
+    `gesamt: <b>${EUR(s.gesamt_eur)}</b>`;
+  t.classList.remove("versteckt");
+  tooltipPosition(e);
+}
+
+function wasserKartenZeigen(k, tarif) {
+  const box = $("#wasserKarten");
+  if (!box) return;
+
+  const stand = $("#wasserStand");
+  if (stand && tarif) {
+    const preis = (Number(tarif.wasserpreis_eur_m3) || 0) + (Number(tarif.abwasser_eur_m3) || 0);
+    stand.textContent = `${tarif.anbieter || "Wasser"} · ${DE(preis, 2)} €/m³`
+      + (tarif.bestaetigt ? "" : " · Beispielwerte");
+    stand.classList.toggle("offen", !tarif.bestaetigt);
+  }
+
+  if ($("#wasserTarifForm") && $("#wasserTarifForm").dataset.aufgebaut !== "ja") {
+    $("#wasserTarifForm").dataset.aufgebaut = "ja";
+    $("#wasserTarifForm").innerHTML = feld("Anbieter", "anbieter")
+      + feld("Tarifname", "tarifname", true)
+      + feld("Wasserpreis (€/m³)", "wasserpreis_eur_m3")
+      + feld("Abwasser (€/m³)", "abwasser_eur_m3")
+      + feld("Grundpreis (€/Monat)", "grundpreis_eur_monat")
+      + `<div class="ganz"><button type="submit" class="primar">Wassertarif speichern</button></div>`;
+    $("#wasserTarifForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const body = {};
+      new FormData(e.target).forEach((v, k) => body[k] = v);
+      const r = await fetch("/api/wassertarif", { method: "POST", body: JSON.stringify(body) });
+      const j = await r.json();
+      if (j.ok) { wasserLaden(); } else { alert(j.fehler || "Fehler"); }
+    });
+  }
+  if (tarif) {
+    for (const f of ["anbieter", "tarifname", "wasserpreis_eur_m3",
+                     "abwasser_eur_m3", "grundpreis_eur_monat"]) {
+      const el = $(`#wasserTarifForm [name=${f}]`);
+      if (el && document.activeElement !== el) el.value = tarif[f] ?? "";
+    }
+  }
+
+  if ($("#wasserKorrekturForm") && $("#wasserKorrekturForm").dataset.aufgebaut !== "ja") {
+    $("#wasserKorrekturForm").dataset.aufgebaut = "ja";
+    $("#wasserKorrekturForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const wert = $("#wasserKorrekturWert").value.trim();
+      const r = await fetch("/api/wasserkorrektur", {
+        method: "POST", body: JSON.stringify({ wert }),
+      });
+      const j = await r.json();
+      const feldStatus = $("#wasserStatusZeile");
+      if (j.ok) {
+        feldStatus.textContent = `Zählerstand ${j.ablesung} m³ gesetzt.`;
+        feldStatus.classList.remove("err");
+        wasserLaden();
+      } else {
+        feldStatus.textContent = j.fehler || "Fehler";
+        feldStatus.classList.add("err");
+      }
+    });
+  }
+
+  if (!k || k.stand_m3 == null) {
+    box.innerHTML = "<div class='karte'><div class='label'>Noch keine Messung</div>"
+      + "<div class='wert'>–</div><div class='zusatz'>Der Sammler liest alle 30 Minuten.</div></div>";
+    return;
+  }
+  const karte = (label, wert, zusatz) =>
+    `<div class="karte"><div class="label">${label}</div><div class="wert">${wert}</div>`
+    + `<div class="zusatz">${zusatz}</div></div>`;
+  const alter = k.alter_sekunden == null ? "" :
+    ` · vor ${Math.round(k.alter_sekunden / 60)} min`;
+  box.innerHTML = [
+    karte("Zählerstand", (k.ablesung || "–") + " m³", `gemessen ${k.stand_text || "–"}${alter}`),
+    karte("Heute", DE(k.tag_m3, 2) + " m³", EUR(k.tag_eur) + " inkl. Grundpreis"),
+    karte("Dieser Monat", DE(k.monat_m3, 1) + " m³", EUR(k.monat_eur)),
+    karte("Dieses Jahr", DE(k.jahr_m3, 1) + " m³", EUR(k.jahr_eur)),
+  ].join("");
+}
+
+async function wasserLaden() {
+  const url = `/api/wasser?einheit=${wasserZustand.einheit}`
+    + (wasserZustand.anzahl ? `&anzahl=${wasserZustand.anzahl}` : "");
+  const antwort = await fetch(url);
+  const d = await antwort.json();
+  wasserKartenZeigen(d.kennzahlen, d.tarif);
+  wasserChartZeichnen(d.spalten, wasserZustand.metrik);
+}
+
+function wasserButtons() {
+  const we = $("#wasserEinheit");
+  if (!we) return;
+  we.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    wasserZustand.einheit = b.dataset.e; wasserZustand.anzahl = "";
+    const wa = $("#wasserAnzahl"); if (wa) wa.value = "";
+    we.querySelectorAll("button").forEach((x) => x.classList.toggle("aktiv", x === b));
+    wasserLaden();
+  });
+  const wm = $("#wasserMetrik");
+  wm.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    wasserZustand.metrik = b.dataset.m;
+    wm.querySelectorAll("button").forEach((x) => x.classList.toggle("aktiv", x === b));
+    wasserLaden();
+  });
+  const wa = $("#wasserAnzahl");
+  if (wa) wa.addEventListener("change", () => {
+    wasserZustand.anzahl = wa.value; wasserLaden();
+  });
+}
+
 // ------------------------------------------------------------------- Laden
 
 async function laden() {
@@ -455,6 +666,7 @@ async function laden() {
   prognoseZeigen(daten.kennzahlen);
   chartZeichnen(daten.spalten, zustand.metrik);
   stromLaden();
+  wasserLaden();
   detailZeigen(daten);
 }
 

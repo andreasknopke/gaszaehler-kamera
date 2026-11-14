@@ -35,5 +35,18 @@
     "aktiv": true,
     "python": "~/.local/ocrenv/bin/python",
     "intervall_sekunden": 0
+  },
+  "wasser": {
+    "url": "http://localhost:8098/frame.jpg",
+    "drehen": 270,
+    "tarif": {
+      "anbieter": "",
+      "tarifname": "",
+      "wasserpreis_eur_m3": 2.0,
+      "abwasser_eur_m3": 2.5,
+      "grundpreis_eur_monat": 8.0,
+      "bestaetigt": false,
+      "hinweis": "Platzhalterwerte - bitte Wasser- und Abwasserpreis aus der Abrechnung eintragen."
+    }
   }
 }

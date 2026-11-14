@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 import gas
 import strom
+import wasser
 
 BASE = Path(__file__).resolve().parent
 PORT = 8077
@@ -183,6 +184,78 @@ def strom_kennzahlen(tarif):
         "gesamt_kwh": round(gesamt, 2),
         "messpunkte": len(deltas),
     }
+
+
+# ---------------------------------------------------- Wasser (Kamera .44)
+
+def wasser_deltas():
+    """(zeitpunkt, m3) — Anker zaehlen nicht als Verbrauch."""
+    con = wasser.db()
+    try:
+        reihe = con.execute("SELECT ts, m3, quelle FROM wasser ORDER BY ts").fetchall()
+    finally:
+        con.close()
+    diffs, vorher = [], None
+    for ts, m3, quelle in reihe:
+        if vorher is not None and quelle != "anker":
+            diff = m3 - vorher[1]
+            if 0 <= diff <= 20:                     # Zaehlerspruenge verwerfen
+                diffs.append((ts, diff))
+        vorher = (ts, m3)
+    return diffs
+
+
+def wasser_serie(einheit, anzahl, tarif):
+    """Wasserverbrauch (m3 und EUR) je Periode."""
+    pro_periode = {}
+    for ts, diff in wasser_deltas():
+        schluessel = periodenschluessel(ts, einheit)
+        pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + diff
+    preis = (float(tarif.get("wasserpreis_eur_m3") or 0)
+             + float(tarif.get("abwasser_eur_m3") or 0))
+    spalten = []
+    for schluessel in periodenliste(einheit, anzahl):
+        m3 = round(pro_periode.get(schluessel, 0.0), 2)
+        std = EINHEITEN[einheit]["std_pro_strich"]
+        spalten.append({
+            "periode": schluessel,
+            "m3": m3,
+            "eur": round(m3 * preis, 2),
+            "gesamt_eur": round(m3 * preis + gas.grundkosten(std, tarif), 2),
+        })
+    return spalten
+
+
+def wasser_kennzahlen(tarif):
+    jetzt = datetime.now()
+    preis = (float(tarif.get("wasserpreis_eur_m3") or 0)
+             + float(tarif.get("abwasser_eur_m3") or 0))
+    deltas = wasser_deltas()
+    tag = monat = jahr = gesamt = 0.0
+    for ts, diff in deltas:
+        d = datetime.fromtimestamp(ts)
+        gesamt += diff
+        if d.date() == jetzt.date():
+            tag += diff
+        if (d.year, d.month) == (jetzt.year, jetzt.month):
+            monat += diff
+        if d.year == jetzt.year:
+            jahr += diff
+    ts_letzte, stand = wasser.letzte()
+    grund = float(tarif.get("grundpreis_eur_monat") or 0)
+    return {
+        "stand_m3": round(stand, 0) if stand is not None else None,
+        "ablesung": wasser.ablesung_text(stand) if stand is not None else None,
+        "stand_text": (datetime.fromtimestamp(ts_letzte).strftime("%d.%m. %H:%M")
+                       if ts_letzte else None),
+        "alter_sekunden": max(0, int(time.time() - ts_letzte)) if ts_letzte else None,
+        "tag_m3": round(tag, 2), "tag_eur": round(tag * preis + grund / 30.4375, 2),
+        "monat_m3": round(monat, 2), "monat_eur": round(monat * preis + grund, 2),
+        "jahr_m3": round(jahr, 2), "jahr_eur": round(jahr * preis + grund * 12, 2),
+        "gesamt_m3": round(gesamt, 2),
+        "messpunkte": len(deltas),
+    }
+
 
 def zusammenfassung(tarif):
     """Kennzahlen fuer die Karten und die Prognosen."""
@@ -381,7 +454,23 @@ class Handler(BaseHTTPRequestHandler):
                     "kennzahlen": strom_kennzahlen((cfg.get("strom") or {}).get("tarif") or {}),
                     "tarif": (cfg.get("strom") or {}).get("tarif") or {},
                 },
+                "wasser": {
+                    "kennzahlen": wasser_kennzahlen((cfg.get("wasser") or {}).get("tarif") or {}),
+                    "tarif": (cfg.get("wasser") or {}).get("tarif") or {},
+                },
                 "serverzeit": time.time(),
+            })
+        if url.path == "/api/wasser":
+            einheit = (frage.get("einheit", ["tag"])[0]).lower()
+            if einheit not in EINHEITEN:
+                einheit = "tag"
+            anzahl = int(frage.get("anzahl", [EINHEITEN[einheit]["anzahl"]])[0])
+            tarif_w = (cfg.get("wasser") or {}).get("tarif") or {}
+            return self._json({
+                "einheit": einheit,
+                "spalten": wasser_serie(einheit, anzahl, tarif_w),
+                "kennzahlen": wasser_kennzahlen(tarif_w),
+                "tarif": tarif_w,
             })
         if url.path == "/api/strom":
             einheit = (frage.get("einheit", ["tag"])[0]).lower()
@@ -424,6 +513,34 @@ class Handler(BaseHTTPRequestHandler):
                 t["bestaetigt"] = bool(daten["bestaetigt"])
             gas.save_config(cfg)
             return self._json({"ok": True, "tarif": t})
+        if url.path == "/api/wasserkorrektur":
+            roh = str(daten.get("wert", "")).replace(",", ".").strip()
+            try:
+                wert = float(roh)
+            except ValueError:
+                return self._json({"fehler": "kein Wert"}, 400)
+            if not 0 <= wert <= 99999:
+                return self._json({"fehler": "Wert ausserhalb 0..99999"}, 400)
+            wasser.anker_setzen(wert)
+            return self._json({"ok": True, "wert": wert,
+                               "ablesung": wasser.ablesung_text(wert)})
+        if url.path == "/api/wassertarif":
+            wcfg = cfg.setdefault("wasser", {})
+            tw = wcfg.setdefault("tarif", {})
+            for feld in ("anbieter", "tarifname", "hinweis"):
+                if feld in daten:
+                    tw[feld] = daten[feld]
+            for feld in ("wasserpreis_eur_m3", "abwasser_eur_m3",
+                         "grundpreis_eur_monat"):
+                if feld in daten:
+                    try:
+                        tw[feld] = float(str(daten[feld]).replace(",", "."))
+                    except ValueError:
+                        return self._json({"fehler": f"{feld} ist keine Zahl"}, 400)
+            if "bestaetigt" in daten:
+                tw["bestaetigt"] = bool(daten["bestaetigt"])
+            gas.save_config(cfg)
+            return self._json({"ok": True, "tarif": tw})
         if url.path == "/api/tarif":
             for feld in ("anbieter", "tarifname", "hinweis"):
                 if feld in daten:

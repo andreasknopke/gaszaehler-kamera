@@ -51,7 +51,13 @@ Viewer und Web‑Ansicht.
    (alte + 1) und legt das Bild als Vorlage ab; so entstehen alle zehn
    Ziffern je Walze von selbst. Gelesen wird per Ähnlichkeitsvergleich
    (Nearest Neighbor) mit Mindestabstand zur zweitbesten Ziffer.
-6. **Gegenprobe** – Ablesung und Zählung werden gegeneinander geprüft.
+6. **OCR-Rückfallebene** (`ablesen_ocr.py`) – wenn die Lernbank unsicher
+   ist, liest RapidOCR (ONNX) die Walzen unabhängig. Tesseract scheitert auf
+   diesen kleinen, weichen Ziffern (getestet: 1 von 5 Ziffern), RapidOCR
+   erkennt sie zuverlässig, wenn man ihm jede Walze **einzeln** gibt und die
+   Ziffer mehrfach nebeneinander legt. Die Rückfallebene läuft höchstens alle
+   10 Minuten, weil sie rund 13 s braucht.
+7. **Gegenprobe** – Ablesung und Zählung werden gegeneinander geprüft.
    Weicht die gelesene Ziffernfolge um mindestens eine Auflösungsstufe von
    der Zählung ab, gewinnt die Ablesung (z. B. wenn ein Schritt durchgerutscht
    ist). Zusätzlich liest Tesseract etwa stündlich den m³‑Block und
@@ -94,6 +100,7 @@ ziffern.py              Lernbank: Ziffern lesen und lernen
 sample.py               ein Messlauf (per Cron alle 5 Minuten)
 lernen.py               Serienbilder aufnehmen und Ziffern nachlernen
 server.py               Web-UI + JSON-API (Port 8077)
+ablesen_ocr.py          Ziffernablesung per RapidOCR (ONNX), einzeln je Walze
 mqtt.py                 minimaler MQTT-Client (ohne Zusatzpaket)
 mqtt_bruecke.py         Messwerte an Home Assistant (MQTT-Discovery)
 startwert_ermitteln.py  Basiswert setzen / Walzen neu anlernen

@@ -113,7 +113,7 @@ def _jpeg(daten):
     return daten[s:e + 2]
 
 
-def _hole_jpeg(url, maxbytes=3_000_000, timeout=12):
+def _hole_jpeg(url, maxbytes=3_000_000, timeout=6):
     """Erstes vollstaendiges JPEG holen.
 
     Die Kamera liefert auf der Stream-URL einen *endlosen* MJPEG-Strom. Ein
@@ -167,11 +167,12 @@ def hole_bild(cfg=None):
     cfg = cfg or load_config()
     k = cfg["kamera"]
     fehler = []
-    # Der Viewer liefert das Bild bereits in Anzeige-Orientierung, die Kamera
-    # direkt dagegen um 180 Grad verdreht. Deshalb pro Quelle eigener Winkel.
+    # Der lokale Viewer haelt den Kamerastream bereits offen und liefert das
+    # neueste Bild in Millisekunden; die Kamera direkt ist oft traege und
+    # laeuft dann erst in den Timeout. Deshalb zuerst der Viewer.
     quellen = [
-        (k["url_direkt"], k.get("drehen", 0)),
         (k["url_ansicht"], k.get("drehen_ansicht", 0)),
+        (k["url_direkt"], k.get("drehen", 0)),
     ]
     for url, drehen in quellen:
         try:

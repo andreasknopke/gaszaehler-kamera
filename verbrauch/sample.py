@@ -12,6 +12,8 @@ Reihenfolge:
 
 import fcntl
 import json
+import os
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -49,6 +51,45 @@ def haupt_ocr():
     except Exception as exc:
         log("OCR-Fehler:", repr(exc))
         return ""
+
+
+def ocr_ablesung(cfg):
+    """RapidOCR als Rueckfallebene, wenn die Lernbank unsicher ist.
+
+    Laeuft im eigenen venv (onnxruntime liegt nicht im System-Python).
+    Rueckgabe: (ziffern, wert, aufloesung) oder None.
+    """
+    o = cfg.get("ocr") or {}
+    if not o.get("aktiv"):
+        return None
+    python = Path(os.path.expanduser(o.get("python", "~/.local/ocrenv/bin/python")))
+    if not python.exists():
+        log("OCR: Interpreter fehlt:", python)
+        return None
+    try:
+        lauf = subprocess.run([str(python), str(BASIS / "ablesen_ocr.py"), "--json"],
+                              capture_output=True, text=True, timeout=90)
+        zeilen = [z for z in lauf.stdout.strip().splitlines() if z.startswith("{")]
+        if not zeilen:
+            log("OCR: keine Ausgabe:", (lauf.stderr or "").strip()[:200])
+            return None
+        daten = json.loads(zeilen[-1])
+    except Exception as exc:
+        log("OCR-Fehler:", repr(exc))
+        return None
+
+    liste = daten.get("ziffern") or []
+    if len(liste) != 8:
+        return None
+    gewichte = ziffern.GEWICHTE
+    erste = next((i for i, z in enumerate(liste) if z is None), None)
+    if erste is None:
+        return liste, sum(z * g for z, g in zip(liste, gewichte)), gewichte[-1]
+    if any(z is not None for z in liste[erste:]):
+        return None                                    # Luecke mitten drin
+    return (liste,
+            sum(z * g for z, g in zip(liste[:erste], gewichte)),
+            10 * gewichte[erste])
 
 
 def main():
@@ -94,6 +135,20 @@ def main():
 
             # --- 5) Ziffern lesen (rollende Walzen bleiben offen)
             gez, gelesen, details, komplett, aufloesung = bank.lies(zellen, rollend)
+
+            # Wenn die Lernbank unsicher ist: unabhaengige OCR (RapidOCR).
+            # Hoechstens alle 10 Minuten, weil die Erkennung ~13 s braucht.
+            if gelesen is None or aufloesung > 0.1:
+                stempel = BASIS / "logs" / ".ocr_zuletzt"
+                letzte_ocr = stempel.stat().st_mtime if stempel.exists() else 0
+                if time.time() - letzte_ocr > 600:
+                    ocr = ocr_ablesung(cfg)
+                    if ocr and ocr[1] is not None and ocr[2] <= 0.1:
+                        gez, gelesen, aufloesung = ocr
+                        komplett = aufloesung <= 0.0015
+                        stempel.write_text(str(int(time.time())))
+                        log(f"OCR-Ablesung uebernommen: {ziffern.text(gez)} "
+                            f"(Aufloesung {aufloesung:g} m3)")
 
             # Labels nachziehen, damit die +1-Zaehlung weiterläuft
             labels = bank.labels()

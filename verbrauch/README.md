@@ -51,12 +51,13 @@ Viewer und Web‑Ansicht.
    (alte + 1) und legt das Bild als Vorlage ab; so entstehen alle zehn
    Ziffern je Walze von selbst. Gelesen wird per Ähnlichkeitsvergleich
    (Nearest Neighbor) mit Mindestabstand zur zweitbesten Ziffer.
-6. **OCR-Rückfallebene** (`ablesen_ocr.py`) – wenn die Lernbank unsicher
-   ist, liest RapidOCR (ONNX) die Walzen unabhängig. Tesseract scheitert auf
-   diesen kleinen, weichen Ziffern (getestet: 1 von 5 Ziffern), RapidOCR
-   erkennt sie zuverlässig, wenn man ihm jede Walze **einzeln** gibt und die
-   Ziffer mehrfach nebeneinander legt. Die Rückfallebene läuft höchstens alle
-   10 Minuten, weil sie rund 13 s braucht.
+6. **Ziffernablesung per OCR** (`ablesen_ocr.py`) – RapidOCR (ONNX) liest
+   jede Walze **einzeln** und mit hoher Zuverlässigkeit; Tesseract scheitert
+   auf diesen weichen Ziffern (getestet: 1 von 5). Der entscheidende Trick:
+   die Ziffer wird fünfmal nebeneinander an den Erkenner gegeben, sonst wird
+   ein einzelnes Zeichen als Textzeile verworfen. Das läuft bei jedem Messlauf
+   (rund 1 s) und **korrigiert die Zählung** – auch dann, wenn die Lernbank
+   sich sicher ist, denn genau dort lagen die Fehler.
 7. **Gegenprobe** – Ablesung und Zählung werden gegeneinander geprüft.
    Weicht die gelesene Ziffernfolge um mindestens eine Auflösungsstufe von
    der Zählung ab, gewinnt die Ablesung (z. B. wenn ein Schritt durchgerutscht

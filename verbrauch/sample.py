@@ -136,19 +136,20 @@ def main():
             # --- 5) Ziffern lesen (rollende Walzen bleiben offen)
             gez, gelesen, details, komplett, aufloesung = bank.lies(zellen, rollend)
 
-            # Wenn die Lernbank unsicher ist: unabhaengige OCR (RapidOCR).
-            # Hoechstens alle 10 Minuten, weil die Erkennung ~13 s braucht.
-            if gelesen is None or aufloesung > 0.1:
-                stempel = BASIS / "logs" / ".ocr_zuletzt"
-                letzte_ocr = stempel.stat().st_mtime if stempel.exists() else 0
-                if time.time() - letzte_ocr > 600:
-                    ocr = ocr_ablesung(cfg)
-                    if ocr and ocr[1] is not None and ocr[2] <= 0.1:
-                        gez, gelesen, aufloesung = ocr
-                        komplett = aufloesung <= 0.0015
-                        stempel.write_text(str(int(time.time())))
-                        log(f"OCR-Ablesung uebernommen: {ziffern.text(gez)} "
-                            f"(Aufloesung {aufloesung:g} m3)")
+            # Unabhaengige OCR (RapidOCR) alle paar Minuten. Sie hat Vorrang
+            # vor der Lernbank: Die Bank kann sich irren (falsch gelernte
+            # Ziffer), die OCR liest das Bild direkt.
+            stempel = BASIS / "logs" / ".ocr_zuletzt"
+            letzte_ocr = stempel.stat().st_mtime if stempel.exists() else 0
+            intervall = float((cfg.get("ocr") or {}).get("intervall_sekunden", 300))
+            if time.time() - letzte_ocr > intervall:
+                ocr = ocr_ablesung(cfg)
+                if ocr and ocr[1] is not None and ocr[2] <= 0.1:
+                    gez, gelesen, aufloesung = ocr
+                    komplett = aufloesung <= 0.0015
+                    stempel.write_text(str(int(time.time())))
+                    log(f"OCR-Ablesung: {ziffern.text(gez)} "
+                        f"(Aufloesung {aufloesung:g} m3)")
 
             # Labels nachziehen, damit die +1-Zaehlung weiterläuft
             labels = bank.labels()

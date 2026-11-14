@@ -33,6 +33,7 @@
   },
   "ocr": {
     "aktiv": true,
-    "python": "~/.local/ocrenv/bin/python"
+    "python": "~/.local/ocrenv/bin/python",
+    "intervall_sekunden": 0
   }
 }

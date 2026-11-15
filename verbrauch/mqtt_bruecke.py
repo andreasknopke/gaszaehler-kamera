@@ -134,7 +134,8 @@ WASSER_ENTITAETEN = [
       "suggested_display_precision": 0}),
 ]
 
-ABLAUF_SEKUNDEN = 900
+ABLAUF_SEKUNDEN = 900        # Gas: nach 15 min ohne Wert nicht verfuegbar
+ABLAUF_WASSER = 93600        # Wasser: taegliche Messung -> 26 Stunden
 
 
 def gas_leistung_kurz(minuten=20):
@@ -160,31 +161,48 @@ def gas_leistung_kurz(minuten=20):
     return round(max(0.0, (m1 - m0) / ((t1 - t0) / 3600.0)), 3)
 
 
-def _monoton(schluessel, wert):
-    """Kumulativen Zaehlerstand nie kleiner veroeffentlichen als zuletzt.
+MAX_SPRUNG_M3 = 1.0   # mehr als 1 m3 zwischen zwei Messungen ist physikalisch unmoeglich
 
-    HA behandelt Sensoren mit state_class total_increasing bei jedem Rueckwaerts-
-    sprung als Zaehlerreset (Warnung im Log, verfaelschte Statistik). Die
-    Ablesung schwankt aber gelegentlich um eine Zehntelstelle.
+
+def _stand_plausibel(wert):
+    """Nur plausible Zaehlerstaende veroeffentlichen.
+
+    HA wertet jeden Rueckwaertssprung eines total_increasing-Sensors als
+    Zaehlerreset und zaehlt dann den KOMPLETTEN Zaehlerstand als Verbrauch.
+    Rueckwaerts-Wackler (< 0.05 m3) und Vorwaerts-Ausreisser (> MAX_SPRUNG_M3 pro
+    Messung) werden deshalb verworfen; gemeldet wird der letzte gute Wert.
+    Die fruehere Fassung mit max(wert, vorher) hat einen einmaligen OCR-Ausreisser
+    dauerhaft festgeschrieben - daher der 11-m3-Sprung.
     """
     if wert is None:
         return None
+    wert = float(wert)
     con = gas.db()
     try:
-        zeile = con.execute("SELECT wert FROM zustand WHERE schluessel = ?",
-                            (schluessel,)).fetchone()
-        vorher = None
-        if zeile and zeile[0] not in (None, ""):
+        def hole(schluessel):
+            zeile = con.execute("SELECT wert FROM zustand WHERE schluessel = ?",
+                                (schluessel,)).fetchone()
+            if not zeile or zeile[0] in (None, ""):
+                return None
             try:
-                vorher = float(zeile[0])
-            except ValueError:
-                vorher = None
-        neu = float(wert) if vorher is None else max(float(wert), vorher)
-        if vorher is None or neu != vorher:
+                return float(zeile[0])
+            except (TypeError, ValueError):
+                return None
+
+        def setze(schluessel, zahl):
             con.execute("INSERT OR REPLACE INTO zustand (schluessel, wert) VALUES (?, ?)",
-                        (schluessel, str(neu)))
+                        (schluessel, "%.3f" % zahl))
             con.commit()
-        return neu
+
+        letzter = hole("mqtt_stand_ok")
+        if letzter is None:
+            setze("mqtt_stand_ok", wert)
+            return wert
+        schritt = wert - letzter
+        if schritt < -0.05 or schritt > MAX_SPRUNG_M3:
+            return letzter
+        setze("mqtt_stand_ok", wert)
+        return wert
     finally:
         con.close()
 
@@ -201,7 +219,7 @@ def werte():
     except (OSError, OverflowError):
         letzte = ""
     return {
-        "zaehlerstand_m3": _monoton("mqtt_stand_max", zus.get("stand")),
+        "zaehlerstand_m3": _stand_plausibel(zus.get("stand")),
         "verbrauch_heute_m3": zus.get("tag_m3"),
         "verbrauch_woche_m3": zus.get("woche_m3"),
         "verbrauch_monat_m3": zus.get("monat_m3"),
@@ -252,7 +270,7 @@ def wasser_werte():
     }
 
 
-def _pakete_fuer(daten, entitaeten, geraet, basis, entdeckung):
+def _pakete_fuer(daten, entitaeten, geraet, basis, entdeckung, ablauf=ABLAUF_SEKUNDEN):
     verfuegbar = f"{basis}/verfuegbar"
     liste = [(verfuegbar, "online")]
     for objekt, name, feld, einheit, optionen in entitaeten:
@@ -271,7 +289,7 @@ def _pakete_fuer(daten, entitaeten, geraet, basis, entdeckung):
             "availability_topic": verfuegbar,
             "payload_available": "online",
             "payload_not_available": "offline",
-            "expire_after": ABLAUF_SEKUNDEN,
+            "expire_after": ablauf,
             "device": geraet,
         }
         if einheit:
@@ -308,7 +326,7 @@ def pakete(cfg=None):
     if wdaten:
         wbasis = k.get("basis_wasser", "wasserzaehler")
         liste += _pakete_fuer(wdaten, WASSER_ENTITAETEN, WASSER_GERAET,
-                              wbasis, entdeckung)
+                              wbasis, entdeckung, ablauf=ABLAUF_WASSER)
     return liste
 
 

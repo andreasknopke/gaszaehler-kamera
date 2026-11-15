@@ -611,7 +611,7 @@ function wasserKartenZeigen(k, tarif) {
 
   if (!k || k.stand_m3 == null) {
     box.innerHTML = "<div class='karte'><div class='label'>Noch keine Messung</div>"
-      + "<div class='wert'>–</div><div class='zusatz'>Der Sammler liest alle 30 Minuten.</div></div>";
+      + "<div class='wert'>–</div><div class='zusatz'>Der Sammler liest einmal täglich.</div></div>";
     return;
   }
   const karte = (label, wert, zusatz) =>

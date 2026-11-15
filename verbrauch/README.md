@@ -108,7 +108,7 @@ strom.py                Strombezug: Datenhaltung
 strom_sammeln.py        Strombezug: Messlauf (MQTT-Abruf)
 wasser.py               Wasserzähler: Ablesung und Datenhaltung
 wasser_lesen.py         Wasserzähler: Ziffernerkennung (RapidOCR, im venv)
-wasser_sammeln.py       Wasserzähler: Messlauf (per Cron alle 30 Minuten)
+wasser_sammeln.py       Wasserzähler: Messlauf (per Cron täglich)
 lernen.py               Serienbilder aufnehmen und Ziffern nachlernen
 server.py               Web-UI + JSON-API (Port 8077)
 ablesen_ocr.py          Ziffernablesung per RapidOCR (ONNX), einzeln je Walze
@@ -162,7 +162,7 @@ es bereits aufrecht, der Zoom zeigt die Ziffernzeile.
   stehen und es erscheint ein Hinweis — geraten wird nicht.
 * Stellen unter Reflexen auf dem Glas werden nicht erkannt; sie werden aus
   dem letzten Stand übernommen (die führende 0 ändert sich jahrelang nicht).
-* Messung **alle 30 Minuten**. Der Zähler läuft so langsam, dass das reicht.
+* Messung **einmal täglich** (07:00). Der Zähler läuft so langsam, dass das reicht.
 * Einmalig den Stand eintragen (`python3 wasser_sammeln.py --anker 7`) oder
   in der Web-Ansicht unter *Wasserzähler korrigieren*.
 

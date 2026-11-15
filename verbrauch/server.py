@@ -117,6 +117,29 @@ def perioden_anteile(t0, t1, wert, einheit):
     return anteile
 
 
+def _zuwaechse(reihe, max_diff, anker_quellen):
+    """(von, bis, zuwachs) aus einer Zaehlerreihe.
+
+    Wichtig: Ein *Rueckwaerts*-Sprung ist eine Fehlablesung (OCR liest
+    gelegentlich eine falsche Ziffer). Dann bleibt der letzte gueltige Wert
+    stehen, statt den anschliessenden "Erholungssprung" als Verbrauch zu
+    buchen. Genau das hatte den Stundenwert 08:00 von 0,58 auf 1,67 m3
+    aufgeblaeht.
+    """
+    ergebnis, letzter = [], None
+    for ts, wert, quelle in reihe:
+        if letzter is None or quelle in anker_quellen:
+            letzter = (ts, wert)
+            continue
+        if wert < letzter[1]:
+            continue                                  # Rueckwaerts = Fehlablesung
+        diff = wert - letzter[1]
+        if diff <= max_diff:
+            ergebnis.append((letzter[0], ts, diff))
+        letzter = (ts, wert)
+    return ergebnis
+
+
 def _deltas():
     """(zeitpunkt, verbrauch_m3) - Korrektur- und Startwerte sind Anker, kein Verbrauch."""
     con = gas.db()
@@ -124,14 +147,8 @@ def _deltas():
         reihe = con.execute("SELECT ts, m3, quelle FROM messungen ORDER BY ts").fetchall()
     finally:
         con.close()
-    diffs, vorher = [], None
-    for ts, m3, quelle in reihe:
-        if vorher is not None and quelle not in KORREKTUR_QUELLEN:
-            diff = m3 - vorher[1]
-            if 0 <= diff <= 5:                       # Ausreisser/Luecken verwerfen
-                diffs.append((ts, diff))
-        vorher = (ts, m3)
-    return diffs
+    return [(ts, diff) for _t0, ts, diff in
+            _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN)]
 
 
 def serie(einheit, anzahl, tarif):
@@ -146,14 +163,9 @@ def serie(einheit, anzahl, tarif):
         reihe = con.execute("SELECT ts, m3, quelle FROM messungen ORDER BY ts").fetchall()
     finally:
         con.close()
-    vorher = None
-    for ts, m3, quelle in reihe:
-        if vorher is not None and quelle not in KORREKTUR_QUELLEN:
-            diff = m3 - vorher[1]
-            if 0 <= diff <= 5:
-                for schluessel, anteil in perioden_anteile(vorher[0], ts, diff, einheit).items():
-                    pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
-        vorher = (ts, m3)
+    for t0, t1, diff in _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN):
+        for schluessel, anteil in perioden_anteile(t0, t1, diff, einheit).items():
+            pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
 
     spalten = []
     for schluessel in periodenliste(einheit, anzahl):
@@ -181,14 +193,7 @@ def strom_deltas(art="netz"):
             f"SELECT ts, kwh, quelle FROM {strom.tabelle(art)} ORDER BY ts").fetchall()
     finally:
         con.close()
-    diffs, vorher = [], None
-    for ts, kwh, quelle in reihe:
-        if vorher is not None and quelle != "anker":
-            diff = kwh - vorher[1]
-            if 0 <= diff <= 100:                    # Zaehlerspruenge verwerfen
-                diffs.append((ts, diff))
-        vorher = (ts, kwh)
-    return diffs
+    return [(ts, diff) for _t0, ts, diff in strom_zuwaechse(art)]
 
 
 def strom_zuwaechse(art="netz"):
@@ -199,14 +204,7 @@ def strom_zuwaechse(art="netz"):
             f"SELECT ts, kwh, quelle FROM {strom.tabelle(art)} ORDER BY ts").fetchall()
     finally:
         con.close()
-    zuwaechse, vorher = [], None
-    for ts, kwh, quelle in reihe:
-        if vorher is not None and quelle != "anker":
-            diff = kwh - vorher[1]
-            if 0 <= diff <= 100:
-                zuwaechse.append((vorher[0], ts, diff))
-        vorher = (ts, kwh)
-    return zuwaechse
+    return _zuwaechse(reihe, 100.0, ("anker",))
 
 
 def strom_serie(einheit, anzahl, tarif, art="netz"):
@@ -267,14 +265,7 @@ def wasser_deltas():
         reihe = con.execute("SELECT ts, m3, quelle FROM wasser ORDER BY ts").fetchall()
     finally:
         con.close()
-    diffs, vorher = [], None
-    for ts, m3, quelle in reihe:
-        if vorher is not None and quelle != "anker":
-            diff = m3 - vorher[1]
-            if 0 <= diff <= 20:                     # Zaehlerspruenge verwerfen
-                diffs.append((ts, diff))
-        vorher = (ts, m3)
-    return diffs
+    return [(ts, diff) for _t0, ts, diff in wasser_zuwaechse()]
 
 
 def wasser_zuwaechse():
@@ -284,14 +275,7 @@ def wasser_zuwaechse():
         reihe = con.execute("SELECT ts, m3, quelle FROM wasser ORDER BY ts").fetchall()
     finally:
         con.close()
-    zuwaechse, vorher = [], None
-    for ts, m3, quelle in reihe:
-        if vorher is not None and quelle != "anker":
-            diff = m3 - vorher[1]
-            if 0 <= diff <= 20:
-                zuwaechse.append((vorher[0], ts, diff))
-        vorher = (ts, m3)
-    return zuwaechse
+    return _zuwaechse(reihe, 20.0, ("anker",))
 
 
 def wasser_serie(einheit, anzahl, tarif):

@@ -38,6 +38,18 @@ def log(*teile):
         fh.write(zeile + "\n")
 
 
+def _zustand(con, schluessel, vorgabe=None):
+    zeile = con.execute("SELECT wert FROM zustand WHERE schluessel=?",
+                        (schluessel,)).fetchone()
+    return zeile[0] if zeile else vorgabe
+
+
+def _zustand_setzen(con, schluessel, wert):
+    con.execute("INSERT OR REPLACE INTO zustand VALUES (?, ?)",
+                (schluessel, str(wert)))
+    con.commit()
+
+
 def foto_noetig():
     fotos = sorted(FOTO_DIR.glob("zaehler-*.jpg"))
     return time.time() - (fotos[-1].stat().st_mtime if fotos else 0) > 3600
@@ -184,19 +196,39 @@ def main():
             # "08504,---" heisst 8504,0 <= Wert < 8505,0 (Aufloesung 1 m3).
             # Auch dann muss die Ablesung die Zaehlung korrigieren duerfen -
             # sonst bleibt ein verpasster 0,1-Schritt fuer immer stehen.
+            # Ist die Ablesung stabil? Eine Fehlablesung ist fluechtig, eine
+            # echte Korrektur (z. B. ein falsch gezaehlter Schritt) bleibt.
+            vorher_ocr = _zustand(con, "letzte_ocr")
+            stabil = (vorher_ocr is not None
+                      and abs(gelesen - float(vorher_ocr)) <= 0.08
+                      if gelesen is not None else False)
+            if gelesen is not None:
+                _zustand_setzen(con, "letzte_ocr", gelesen)
+
             if komplett:
-                if abs(gelesen - wert) > 0.0015:
-                    tracker.setze_basiswert(con, gelesen)
-                    tracker.notiz(con, f"{time.strftime('%H:%M')} Zahlwerk sagte "
-                                       f"{wert:.3f}, Ablesung {gelesen:.3f} uebernommen")
-                    log(f"Zaehlung korrigiert: {wert:.3f} -> {gelesen:.3f}")
-                wert = gelesen
-                quelle = "ablesung"
+                if gelesen < wert - 0.02 and not stabil:
+                    # Ein Gaszaehler laeuft nicht rueckwaerts: eine einmalige
+                    # kleinere Ablesung ist eine Fehlablesung und wird
+                    # verworfen. Meldet die OCR denselben Wert zweimal, ist es
+                    # eine echte Korrektur (falsch gezaehlter Schritt).
+                    tracker.notiz(con, f"{time.strftime('%H:%M')} Ablesung "
+                                       f"{ablesung} liegt unter dem Stand "
+                                       f"{wert:.3f} - als Fehlablesung verworfen")
+                    log(f"Rueckwaerts-Ablesung verworfen: {ablesung} < {wert:.3f}")
+                else:
+                    if abs(gelesen - wert) > 0.0015:
+                        tracker.setze_basiswert(con, gelesen)
+                        tracker.notiz(con, f"{time.strftime('%H:%M')} Zahlwerk sagte "
+                                           f"{wert:.3f}, Ablesung {gelesen:.3f} uebernommen")
+                        log(f"Zaehlung korrigiert: {wert:.3f} -> {gelesen:.3f}")
+                    wert = gelesen
+                    quelle = "ablesung"
             elif gelesen is not None and aufloesung <= 1.0:
                 abweichung = wert - gelesen
                 if -0.0005 <= abweichung < aufloesung + 0.0005:
                     quelle = "ablesung"            # Ablesung bestaetigt die Zaehlung
-                elif abs(abweichung) <= max(2 * aufloesung, 1.0):
+                elif abs(abweichung) <= max(2 * aufloesung, 1.0) and (
+                        abweichung <= 0.02 or stabil):
                     # Kleine Abweichung: auf die gelesene Stelle einrasten.
                     # (Der Rahmen max(2*A, 1 m3) laesst Korrekturen bis zu
                     # einem ganzen Kubikmeter zu, aber keine Sprünge durch

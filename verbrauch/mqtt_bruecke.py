@@ -62,6 +62,9 @@ ENTITAETEN = [
     ("leistung", "Leistung (24 h)", "verbrauch_stunde_m3", "m³/h",
      {"state_class": "measurement", "icon": "mdi:speedometer",
       "suggested_display_precision": 3}),
+    ("leistung_aktuell", "Leistung (aktuell)", "leistung_aktuell_m3h", "m³/h",
+     {"state_class": "measurement", "icon": "mdi:fire",
+      "suggested_display_precision": 2, "genauigkeit": 3}),
     ("kosten_heute", "Kosten heute", "kosten_heute_eur", "€",
      {"device_class": "monetary", "state_class": "measurement",
       "icon": "mdi:currency-eur", "suggested_display_precision": 2}),
@@ -99,6 +102,9 @@ WASSER_ENTITAETEN = [
     ("verbrauch_heute", "Verbrauch heute", "tag_m3", "m³",
      {"device_class": "water", "state_class": "measurement",
       "icon": "mdi:water-outline", "suggested_display_precision": 2}),
+    ("leistung_aktuell", "Durchfluss (aktuell)", "leistung_aktuell_m3h", "m³/h",
+     {"state_class": "measurement", "device_class": "volume_flow_rate",
+      "icon": "mdi:water-pump", "suggested_display_precision": 3, "genauigkeit": 3}),
     ("verbrauch_woche", "Verbrauch 7 Tage", "woche_m3", "m³",
      {"device_class": "water", "state_class": "measurement",
       "icon": "mdi:calendar-week", "suggested_display_precision": 2}),
@@ -129,6 +135,29 @@ WASSER_ENTITAETEN = [
 ]
 
 ABLAUF_SEKUNDEN = 900
+
+
+def gas_leistung_kurz(minuten=20):
+    """Momentaner Gasfluss in m3/h aus den letzten Ablesungen.
+
+    Die Kamera liest alle 2 Minuten; ueber ein 20-Minuten-Fenster ist der Zuwachs
+    aussagekraeftig genug fuer eine Live-Anzeige. Korrektur- und Startwerte
+    zaehlen nicht als Verbrauch.
+    """
+    con = gas.db()
+    try:
+        reihe = con.execute(
+            "SELECT ts, m3, quelle FROM messungen WHERE ts >= ? ORDER BY ts",
+            (int(time.time() - minuten * 60),)).fetchall()
+    finally:
+        con.close()
+    reihe = [(ts, m3) for ts, m3, quelle in reihe if quelle not in ("start", "manuell")]
+    if len(reihe) < 2:
+        return 0.0
+    (t0, m0), (t1, m1) = reihe[0], reihe[-1]
+    if t1 <= t0:
+        return 0.0
+    return round(max(0.0, (m1 - m0) / ((t1 - t0) / 3600.0)), 3)
 
 
 def _monoton(schluessel, wert):
@@ -178,6 +207,7 @@ def werte():
         "verbrauch_monat_m3": zus.get("monat_m3"),
         "verbrauch_jahr_m3": zus.get("jahr_m3"),
         "verbrauch_stunde_m3": zus.get("pro_stunde_m3"),
+        "leistung_aktuell_m3h": gas_leistung_kurz(),
         "kosten_heute_eur": zus.get("tag_eur"),
         "kosten_monat_eur": zus.get("monat_eur"),
         "kosten_jahr_eur": zus.get("jahr_eur"),
@@ -209,6 +239,7 @@ def wasser_werte():
     return {
         "stand_m3": zus.get("stand_m3"),
         "tag_m3": summe(86400),
+        "leistung_aktuell_m3h": round(summe(1800) * 2, 3),
         "woche_m3": summe(7 * 86400),
         "monat_m3": summe(30.4375 * 86400),
         "jahr_m3": summe(365.25 * 86400),

@@ -6,7 +6,10 @@ Start:  python3 server.py [--port 8077]
 
 import argparse
 import json
+import socket
 import sqlite3
+import subprocess
+import sys
 import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -330,6 +333,40 @@ def wasser_kennzahlen(tarif):
     }
 
 
+def _port_offen(port):
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.6):
+            return True
+    except OSError:
+        return False
+
+
+def _viewer_starten(cfg):
+    """Wasser-Viewer bei Bedarf starten (Kamera sonst untaetig)."""
+    v = (cfg.get("wasser") or {}).get("viewer") or {}
+    port = int(v.get("port", 8098))
+    if _port_offen(port):
+        return port
+    befehl = [sys.executable, str(BASE.parent / "viewer.py"),
+              "--camera", v.get("kamera", "192.168.188.44"),
+              "--port", str(port),
+              "--rotate", str(v.get("drehen", 270)),
+              "--idle-exit", str(v.get("idle_exit", 600))]
+    if v.get("zoom"):
+        befehl += ["--zoom", str(v["zoom"]), "--scale", str(v.get("scale", 8))]
+    try:
+        subprocess.Popen(befehl, cwd=str(BASE.parent),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except Exception:
+        return port
+    for _ in range(25):
+        time.sleep(0.3)
+        if _port_offen(port):
+            break
+    return port
+
+
 def _energiemix_sicher():
     """Strommix; bei Netzproblemen None statt Fehler."""
     try:
@@ -542,6 +579,16 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 "serverzeit": time.time(),
             })
+        if url.path == "/wasserbild":
+            # Wasser-Viewer nur starten, wenn jemand schauen will - sonst
+            # laeuft die Kamera den ganzen Tag unnoetig.
+            port = _viewer_starten(cfg)
+            host = (self.headers.get("Host") or "localhost").split(":")[0]
+            self.send_response(302)
+            self.send_header("Location", f"http://{host}:{port}/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if url.path == "/api/energiemix":
             try:
                 return self._json(energiemix.aktuell())

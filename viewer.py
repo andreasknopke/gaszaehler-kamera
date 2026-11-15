@@ -16,6 +16,7 @@ vergroessert und kontrastverstaerkt ausgeliefert (/zoom.jpg).
 
 import argparse
 import io
+import os
 import json
 import threading
 import time
@@ -29,7 +30,8 @@ except ImportError:  # ohne Pillow laeuft der Viewer ohne Drehen/Zoom
 
 _lock = threading.Lock()
 _frame = {"data": None, "zoom": None, "time": 0.0, "count": 0}
-_cfg = {"rotate": 0, "zoom": None, "scale": 10, "stream": ""}
+_abruf = {"zeit": time.time()}          # letzter Bildabruf durch einen Browser
+_cfg = {"rotate": 0, "zoom": None, "scale": 10, "stream": "", "idle_exit": 0}
 _fehler = {"zeit": 0.0, "text": ""}
 
 
@@ -205,6 +207,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path in ("/frame.jpg", "/zoom.jpg"):
+            _abruf["zeit"] = time.time()
             with _lock:
                 data = _frame["data"] if path == "/frame.jpg" else _frame["zoom"]
             if data is None:
@@ -236,6 +239,20 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _idle_waechter():
+    """Beendet den Viewer, wenn laenger niemand ein Bild abruft.
+
+    Der Wasser-Viewer wird nur bei Bedarf gestartet; ohne diese Bremse
+    wuerde er die Kamera ab dem ersten Klick dauerhaft belasten.
+    """
+    while True:
+        time.sleep(10)
+        grenze = _cfg.get("idle_exit") or 0
+        if grenze and time.time() - _abruf["zeit"] > grenze:
+            print(f"Kein Bildabruf seit {grenze} s - Viewer beendet")
+            os._exit(0)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Live-Viewer fuer Hi3510-Kameras")
     ap.add_argument("--camera", default="192.168.188.43", help="IP der Kamera")
@@ -243,9 +260,12 @@ def main():
     ap.add_argument("--rotate", type=int, default=180, choices=[0, 90, 180, 270])
     ap.add_argument("--zoom", default="", help="Ausschnitt x,y,breite,hoehe")
     ap.add_argument("--scale", type=int, default=10, help="Vergroesserung fuer --zoom")
+    ap.add_argument("--idle-exit", type=int, default=0,
+                    help="nach so vielen Sekunden ohne Bildabruf beenden (0 = nie)")
     args = ap.parse_args()
 
     _cfg["rotate"] = args.rotate
+    _cfg["idle_exit"] = args.idle_exit
     _cfg["scale"] = args.scale
     _cfg["stream"] = ("http://%s/cgi-bin/hi3510/snap.cgi?&-getstream&-chn=11"
                       % args.camera)
@@ -253,6 +273,8 @@ def main():
         _cfg["zoom"] = tuple(int(v) for v in args.zoom.split(","))
 
     threading.Thread(target=read_frames, daemon=True).start()
+    if args.idle_exit:
+        threading.Thread(target=_idle_waechter, daemon=True).start()
     print(f"Viewer laeuft auf http://localhost:{args.port}/  (Strg+C beendet)")
     ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
 

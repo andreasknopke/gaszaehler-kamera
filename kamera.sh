@@ -22,8 +22,12 @@ start() {  # $1=port  $2..=Argumente fuer viewer.py
 }
 
 start 8099 --camera "$KAMERA_1" --port 8099 --rotate 180 --zoom 110,250,680,175 --scale 2
-# Wasserzaehler: Bild steht quer, 270 Grad drehen; Zoom auf die Ziffernzeile
-start 8098 --camera "$KAMERA_2" --port 8098 --rotate 270 --zoom 160,725,175,75 --scale 8
+# Wasserzaehler: NICHT dauerhaft starten - die Kamera soll nur laufen, wenn
+# jemand hinschaut. Der Viewer wird bei Bedarf ueber die Weboberflaeche
+# gestartet (/wasserbild) und beendet sich nach 10 Minuten ohne Abruf selbst.
+# Zum manuellen Schaue:
+#   python3 viewer.py --camera "$KAMERA_2" --port 8098 --rotate 270 \
+#                     --zoom 160,725,175,75 --scale 8 --idle-exit 600
 
 # Gasverbrauchsanzeige (Cron misst unabhaengig davon weiter)
 verbrauch/gaszaehler.sh >/dev/null 2>&1 || true

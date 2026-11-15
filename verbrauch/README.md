@@ -147,9 +147,15 @@ unnötig belasten.
 
 ## Wasserzähler
 
-Der Wasserzähler wird von einer zweiten Kamera (192.168.188.44, Port 8098)
-beobachtet. Das Bild steht quer und wird um 270° gedreht; der Viewer liefert
-es bereits aufrecht, der Zoom zeigt die Ziffernzeile.
+Der Wasserzähler wird von einer zweiten Kamera (192.168.188.44) beobachtet.
+Das Bild steht quer und wird um 270° gedreht.
+
+Die Kamera läuft **nur, wenn sie gebraucht wird**: Die tägliche Ablesung holt
+einen einzelnen Frame direkt von der Kamera (mit Wiederholungen, weil sie
+gelegentlich träge antwortet). Der Live-Viewer (Port 8098) wird erst beim
+Klick auf *Wasser-Zählerbild* gestartet und beendet sich nach 10 Minuten ohne
+Bildabruf selbst (`--idle-exit`). Die Kamera hat keinen Sleep-Modus in der
+Firmware — so bleibt sie trotzdem den Großteil des Tages unbelastet.
 
 * Gelesen werden die **fünf Vorkommastellen** (z. B. `00007`). Die kleinen
   Zeigeruhren für die Bruchteile sind mit 17×22 Pixeln zu klein.

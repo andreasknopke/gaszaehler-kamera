@@ -55,11 +55,30 @@ def db():
 # ----------------------------------------------------------------------- Bild
 
 def bild(cfg=None):
-    """Kamerabild in Anzeige-Orientierung (Ziffern waagerecht)."""
+    """Kamerabild in Anzeige-Orientierung (Ziffern waagerecht).
+
+    Zuerst direkt bei der Kamera - dann muss kein Viewer dauerhaft laufen und
+    die Kamera ist den Rest des Tages untaetig. Die Kamera antwortet
+    gelegentlich traege, deshalb mehrere Versuche; ersatzweise der lokale
+    Viewer, falls er gerade laeuft.
+    """
     cfg = cfg or gas.load_config()
     w = cfg.get("wasser") or {}
-    return gas._bild_aus(w.get("url") or "http://localhost:8098/frame.jpg",
-                         0)
+    quellen = [
+        (w.get("url_direkt"), int(w.get("drehen", 270))),
+        (w.get("url"), int(w.get("drehen_ansicht", 0))),
+    ]
+    letzter_fehler = None
+    for url, drehen in quellen:
+        if not url:
+            continue
+        for _versuch in range(3):
+            try:
+                return gas._bild_aus(url, drehen)
+            except Exception as exc:
+                letzter_fehler = exc
+                time.sleep(1.5)
+    raise RuntimeError(f"Wasserkamera nicht erreichbar: {letzter_fehler}")
 
 
 def _zustand_lesen(con, schluessel, vorgabe=None):

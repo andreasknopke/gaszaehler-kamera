@@ -36,7 +36,7 @@ HW, HH = 12, 16          # halbe Fenstergroesse um eine gefundene Ziffer
 
 # Zuletzt gueltige Ziffernpositionen (Fallback, wenn die Suche scheitert).
 STANDARD_ZELLEN = [
-    (203, 741), (231, 741), (255, 739), (281, 738), (310, 735),
+    (214, 741), (238, 741), (263, 739), (292, 737), (317, 735),
 ]
 
 # Zeichen, die der Erkenner fuer Ziffern haeufig zurueckgibt

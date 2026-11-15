@@ -665,6 +665,53 @@ document.querySelectorAll("[data-viewer]").forEach((a) => {
   a.href = `http://${location.hostname}:${a.dataset.viewer}/`;
 });
 
+
+// ------------------------------------------------- Strommix Deutschland
+
+function co2Bewertung(wert) {
+  if (wert == null) return ["–", "#8b98a9"];
+  if (wert < 150) return ["sehr niedrig", "#4ade80"];
+  if (wert < 250) return ["niedrig", "#a3e635"];
+  if (wert < 350) return ["mittel", "#fbbf24"];
+  if (wert < 500) return ["hoch", "#fb923c"];
+  return ["sehr hoch", "#f87171"];
+}
+
+function mixZeigen(d) {
+  const balken = $("#mixBalken");
+  if (!balken) return;
+  const zeit = $("#mixZeit");
+  if (!d || !d.anteile || !d.anteile.length) {
+    $("#mixCo2").textContent = "–";
+    $("#mixCo2Text").textContent = "Daten derzeit nicht verfügbar";
+    balken.innerHTML = "";
+    $("#mixLegende").innerHTML = "";
+    if (zeit) zeit.textContent = "";
+    return;
+  }
+  const [text, farbe] = co2Bewertung(d.co2_g_kwh);
+  const co2 = $("#mixCo2");
+  co2.textContent = d.co2_g_kwh == null ? "–" : Math.round(d.co2_g_kwh) + " g/kWh";
+  co2.style.color = farbe;
+  $("#mixCo2Text").textContent = text
+    + (d.erneuerbar_prozent != null ? ` · ${DE(d.erneuerbar_prozent, 1)} % erneuerbar` : "");
+
+  const teile = d.anteile.filter((a) => a.anteil > 0)
+    .sort((a, b) => b.anteil - a.anteil);
+  balken.innerHTML = teile.map((a) =>
+    `<div style="width:${a.anteil}%;background:${a.farbe}" `
+    + `title="${a.name}: ${DE(a.anteil, 1)} % (${DE(a.mw, 0)} MW)"></div>`).join("");
+  $("#mixLegende").innerHTML = teile.map((a) =>
+    `<span><i style="background:${a.farbe}"></i>${a.name} `
+    + `<b style="color:#cdd9e5">${DE(a.anteil, 1)} %</b></span>`).join("");
+
+  if (zeit) {
+    const alter = d.alter_sekunden == null ? "" :
+      ` · vor ${Math.round(d.alter_sekunden / 60)} Min.`;
+    zeit.textContent = `Stand ${d.zeit_text}${alter}`;
+  }
+}
+
 // ------------------------------------------------------------------- Laden
 
 async function laden() {
@@ -677,6 +724,7 @@ async function laden() {
   prognoseZeigen(daten.kennzahlen);
   chartZeichnen(daten.spalten, zustand.metrik);
   stromLaden();
+  mixZeigen(daten.energiemix);
   wasserLaden();
   detailZeigen(daten);
 }

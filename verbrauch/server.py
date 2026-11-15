@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import energiemix
 import gas
 import strom
 import wasser
@@ -345,6 +346,14 @@ def wasser_kennzahlen(tarif):
     }
 
 
+def _energiemix_sicher():
+    """Strommix; bei Netzproblemen None statt Fehler."""
+    try:
+        return energiemix.aktuell()
+    except Exception:
+        return None
+
+
 def zusammenfassung(tarif):
     """Kennzahlen fuer die Karten und die Prognosen."""
     con = gas.db()
@@ -542,12 +551,18 @@ class Handler(BaseHTTPRequestHandler):
                     "kennzahlen": strom_kennzahlen((cfg.get("strom") or {}).get("tarif") or {}),
                     "tarif": (cfg.get("strom") or {}).get("tarif") or {},
                 },
+                "energiemix": _energiemix_sicher(),
                 "wasser": {
                     "kennzahlen": wasser_kennzahlen((cfg.get("wasser") or {}).get("tarif") or {}),
                     "tarif": (cfg.get("wasser") or {}).get("tarif") or {},
                 },
                 "serverzeit": time.time(),
             })
+        if url.path == "/api/energiemix":
+            try:
+                return self._json(energiemix.aktuell())
+            except Exception as exc:
+                return self._json({"fehler": str(exc)}, 503)
         if url.path == "/api/wasser":
             einheit = (frage.get("einheit", ["tag"])[0]).lower()
             if einheit not in EINHEITEN:

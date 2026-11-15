@@ -8,7 +8,8 @@ monatlich, jährlich — inklusive Tarifrechnung.
 
 Auf derselben Seite stehen zwei weitere Verbraucher: der **Strombezug** aus dem
 Netz (kumulativer Zähler des Wechselrichters über MQTT) und der
-**Wasserverbrauch** (zweite Kamera am Wasserzähler).
+**Wasserverbrauch** (zweite Kamera am Wasserzähler). Dazu der **Strommix
+Deutschlands** (CO₂-Intensität und Erzeugungsanteile) als Momentaufnahme.
 
 Läuft auf einem gewöhnlichen Linux‑Rechner im Dauerbetrieb, ohne root, ohne
 Cloud. Die Messung startet per Cron, die Auswertung läuft lokal im Browser.
@@ -111,6 +112,7 @@ wasser_sammeln.py       Wasserzähler: Messlauf (per Cron alle 30 Minuten)
 lernen.py               Serienbilder aufnehmen und Ziffern nachlernen
 server.py               Web-UI + JSON-API (Port 8077)
 ablesen_ocr.py          Ziffernablesung per RapidOCR (ONNX), einzeln je Walze
+energiemix.py           Strommix Deutschland (Fraunhofer ISE, Energy-Charts)
 mqtt.py                 minimaler MQTT-Client (ohne Zusatzpaket)
 mqtt_bruecke.py         Messwerte an Home Assistant (MQTT-Discovery)
 startwert_ermitteln.py  Basiswert setzen / Walzen neu anlernen
@@ -122,6 +124,26 @@ static/                 HTML, CSS, JavaScript der Web-Ansicht
 
 Nicht im Repo (werden zur Laufzeit angelegt): `config.json`, `daten.db`,
 `fotos/`, `zellen/`, `bank/`, `logs/`.
+
+## Strommix Deutschland
+
+Der Abschnitt *Strommix Deutschland* zeigt die CO₂-Intensität und die
+Erzeugungsanteile. Die Daten kommen von der **Energy-Charts-API des
+Fraunhofer ISE** (`energiemix.py`):
+
+```
+https://api.energy-charts.info/public_power?country=de
+https://api.energy-charts.info/co2eq?country=de
+```
+
+Frei, ohne Schlüssel, in 15-Minuten-Auflösung. Electricity Maps wäre die
+naheliegende Quelle, blockt aber direkte Abrufe (HTTP 403) und verlangt für
+die API einen kostenpflichtigen Schlüssel.
+
+Die Quelle veröffentlicht mit etwa zwei Stunden Verzug; die Anzeige nennt
+deshalb immer den Stand der Daten. Die Antwort wird 15 Minuten
+zwischengespeichert, damit die regelmäßigen Seitenaufrufe die API nicht
+unnötig belasten.
 
 ## Wasserzähler
 

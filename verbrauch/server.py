@@ -120,15 +120,37 @@ def perioden_anteile(t0, t1, wert, einheit):
     return anteile
 
 
+def _bereinigen(reihe, anker_quellen, tol=0.05, fenster=8):
+    """Fehlablesungen rueckwirkend entfernen.
+
+    Eine Spitze (ploetzlich hoeherer Wert), die wenige Messungen spaeter
+    wieder zurueckfaellt, ist keine echte Zaehlung: Ein Gaszaehler laeuft
+    nur vorwaerts. Solche Punkte werden verworfen. Ohne das zieht ein
+    einzelner Ausreisser den Bezugswert dauerhaft nach oben, und jede
+    spaetere echte Messung gilt als "rueckwaerts" und faellt weg.
+    """
+    werte = [z[1] for z in reihe]
+    ergebnis = []
+    for i, zeile in enumerate(reihe):
+        ts, wert, quelle = zeile
+        if quelle in anker_quellen:
+            ergebnis.append(zeile)
+            continue
+        zukunft = werte[i + 1:i + 1 + fenster]
+        if zukunft and wert > min(zukunft) + tol:
+            continue                                  # Spitze: faellt gleich zurueck
+        ergebnis.append(zeile)
+    return ergebnis
+
+
 def _zuwaechse(reihe, max_diff, anker_quellen):
     """(von, bis, zuwachs) aus einer Zaehlerreihe.
 
-    Wichtig: Ein *Rueckwaerts*-Sprung ist eine Fehlablesung (OCR liest
-    gelegentlich eine falsche Ziffer). Dann bleibt der letzte gueltige Wert
-    stehen, statt den anschliessenden "Erholungssprung" als Verbrauch zu
-    buchen. Genau das hatte den Stundenwert 08:00 von 0,58 auf 1,67 m3
-    aufgeblaeht.
+    Zuerst werden Fehlablesungen entfernt (_bereinigen), dann bleibt bei
+    einem Rueckwaerts-Sprung der letzte gueltige Wert stehen, statt den
+    anschliessenden "Erholungssprung" als Verbrauch zu buchen.
     """
+    reihe = _bereinigen(reihe, anker_quellen)
     ergebnis, letzter = [], None
     for ts, wert, quelle in reihe:
         if letzter is None or quelle in anker_quellen:

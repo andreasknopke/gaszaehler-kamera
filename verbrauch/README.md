@@ -127,9 +127,17 @@ Nicht im Repo (werden zur Laufzeit angelegt): `config.json`, `daten.db`,
 
 ## Prognose und Zeitraumauswahl
 
-Gas- und Stromdiagramm haben einen **Prognose**-Block: aus dem Durchschnitt
-der letzten 24 Stunden (ersatzweise 7 Tage) wird auf Stunde, Tag, Monat und
-Jahr hochgerechnet, inklusive zeitanteiligem Grundpreis.
+Gas- und Stromdiagramm haben einen **Prognose**-Block. Er lernt aus **allen**
+vollständigen Tagen ein **Monatsprofil**: Für jeden Kalendermonat wird der
+mittlere Tagesverbrauch gebildet und daraus auf Tag, Monat und Jahr
+hochgerechnet (inklusive zeitanteiligem Grundpreis).
+
+Damit bildet sich die Saison von selbst ab: Der Sommer bekommt ein eigenes
+Monatsmittel (wenig Heizung, viel Solar → wenig Gas- und Netzbezug), sobald
+Daten für ihn vorliegen. Monate ohne Daten werden vorläufig mit dem Mittel
+aller vorhandenen Monate angesetzt — die Anzeige nennt die Datenbasis
+(„Monatsmittel aus 3 Tagen, 1 Monat mit Daten"). Der laufende Tag zählt nicht
+mit, und Tage mit weniger als 20 Messpunkten werden ignoriert.
 
 Neben den Einheiten (Stündlich/Täglich/Monatlich/Jährlich) gibt es einen
 **Zeitraum-Wähler**:

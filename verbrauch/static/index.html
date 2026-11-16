@@ -34,8 +34,9 @@
   <section class="panel">
     <h2>Prognose bei aktuellem Verbrauch</h2>
     <div class="prognose" id="prognose"></div>
-    <p class="fuSS">Hochrechnung aus dem durchschnittlichen Verbrauch der letzten 24 h
-      (bzw. 7 Tage), inklusive Grundpreis.</p>
+    <p class="fuSS">Hochrechnung aus dem mittleren Tagesverbrauch je Kalendermonat
+      (baut sich über das Jahr auf — der Sommer bekommt ein eigenes Mittel, sobald
+      Daten vorliegen), inklusive Grundpreis. <span id="prognoseBasis"></span></p>
   </section>
 
   <!-- Diagramm -->
@@ -111,8 +112,9 @@
         <h2>Prognose bei aktuellem Bezug</h2>
       </div>
       <div class="prognose" id="stromPrognose"></div>
-      <p class="fuSS">Hochrechnung aus dem durchschnittlichen Netzbezug der letzten 24 h
-        (bzw. 7 Tage), inklusive zeitanteiligem Grundpreis.</p>
+      <p class="fuSS">Hochrechnung aus dem mittleren Tagesbezug je Kalendermonat
+        (baut sich über das Jahr auf), inklusive zeitanteiligem Grundpreis.
+        <span id="stromPrognoseBasis"></span></p>
 
       <div class="diagramm">
         <svg id="stromChart" viewBox="0 0 1000 340" preserveAspectRatio="none"></svg>

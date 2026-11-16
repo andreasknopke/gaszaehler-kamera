@@ -192,6 +192,17 @@ function kartenZeigen(k) {
     `Ablesung laut Bild: <b>${k.ablesung || "–"}</b> · ${k.messpunkte} Messpunkte`;
 }
 
+function prognoseBasisText(k, einheit) {
+  if (!k || !k.prognose_basis) return "";
+  if (k.prognose_basis === "monat") {
+    const monate = k.prognose_monate || 0;
+    return `Basis: Monatsmittel aus ${k.prognose_tage} Tag(en), `
+      + `${monate} Monat${monate === 1 ? "" : "e"} mit Daten.`
+      + (monate < 12 ? " Für die übrigen Monate gilt vorläufig das Mittel aller Monate." : "");
+  }
+  return "Basis: Mittel der letzten 24 h (noch zu wenig vollständige Tage).";
+}
+
 function prognoseZeigen(k) {
   if (!k || !k.stand) return;
   const p = (k2, m3, eur) =>
@@ -202,6 +213,8 @@ function prognoseZeigen(k) {
     p("pro Monat", k.pro_monat_m3, k.pro_monat_eur),
     p("pro Jahr", k.pro_jahr_m3, k.pro_jahr_eur),
   ].join("");
+  const basis = $("#prognoseBasis");
+  if (basis) basis.textContent = prognoseBasisText(k);
 }
 
 // ---------------------------------------------------------------- Tarif / UI
@@ -401,6 +414,8 @@ function stromPrognoseZeigen(k) {
     p("pro Monat", k.pro_monat_kwh, k.pro_monat_eur),
     p("pro Jahr", k.pro_jahr_kwh, k.pro_jahr_eur),
   ].join("");
+  const basis = $("#stromPrognoseBasis");
+  if (basis) basis.textContent = prognoseBasisText(k);
 }
 
 function stromKartenZeigen(k, tarif) {

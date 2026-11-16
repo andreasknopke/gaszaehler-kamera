@@ -5,6 +5,7 @@ Start:  python3 server.py [--port 8077]
 """
 
 import argparse
+import calendar
 import json
 import socket
 import sqlite3
@@ -106,6 +107,53 @@ def periodenliste_fuer(einheit, zeitraum):
     if einheit == "monat":
         return [f"{d.year:04d}-{m:02d}" for m in range(1, 13)]
     return periodenliste("jahr", 5)
+
+
+def prognose(deltas, jetzt=None):
+    """Hochrechnung aus *allen* Tagen mit Monatsprofil.
+
+    Statt nur den letzten Tag fortzuschreiben, wird je Kalendermonat der
+    mittlere Tagesverbrauch aus den vorhandenen Daten gebildet. Das Bild
+    baut sich ueber das Jahr auf: Der Sommer (wenig Heizung, viel Solar)
+    bekommt ein eigenes Monatsmittel, sobald Daten dafuer vorliegen.
+
+    Monate ohne Daten werden mit dem Mittel aller vorhandenen Monate
+    angesetzt - ehrlicher als eine erfundene Saisonkurve.
+
+    -> dict mit stunde/tag/monat/jahr, oder None ohne brauchbare Daten
+    """
+    jetzt = jetzt or datetime.now()
+    pro_tag, messpunkte = {}, {}
+    for ts, diff in deltas:
+        key = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        pro_tag[key] = pro_tag.get(key, 0.0) + diff
+        messpunkte[key] = messpunkte.get(key, 0) + 1
+
+    heute = jetzt.strftime("%Y-%m-%d")
+    voll = {k: v for k, v in pro_tag.items()
+            if k != heute and messpunkte.get(k, 0) >= 20}
+    if not voll:
+        return None
+
+    pro_monat = {}
+    for tag, summe in voll.items():
+        pro_monat.setdefault(int(tag[5:7]), []).append(summe)
+    mittel = {m: sum(werte) / len(werte) for m, werte in pro_monat.items()}
+    gesamt = sum(mittel.values()) / len(mittel)
+
+    aktuell = mittel.get(jetzt.month, gesamt)
+    tage_im_monat = calendar.monthrange(jetzt.year, jetzt.month)[1]
+    jahr = sum(mittel.get(m, gesamt) * calendar.monthrange(jetzt.year, m)[1]
+               for m in range(1, 13))
+    return {
+        "stunde": aktuell / 24,
+        "tag": aktuell,
+        "monat": aktuell * tage_im_monat,
+        "jahr": jahr,
+        "monate_mit_daten": len(mittel),
+        "tage_gesamt": len(voll),
+        "basis": "monat" if jetzt.month in mittel else "gesamt",
+    }
 
 
 KORREKTUR_QUELLEN = ("start", "manuell")
@@ -312,7 +360,15 @@ def strom_kennzahlen(tarif, art="netz"):
     def kosten(kwh, stunden):
         return round(kwh * ap / 100 + grund * stunden / (24 * 30.4375), 2)
 
-    pro_stunde = rate(86400) or rate(7 * 86400)
+    prog = prognose(deltas)
+    if prog:
+        pro_stunde, pro_tag = prog["stunde"], prog["tag"]
+        pro_monat, pro_jahr = prog["monat"], prog["jahr"]
+    else:
+        pro_stunde = rate(86400) or rate(7 * 86400)
+        pro_tag = pro_stunde * 24
+        pro_monat = pro_stunde * 24 * 30.4375
+        pro_jahr = pro_stunde * 24 * 365.25
     ts_letzte, stand = strom.letzte(art)
     return {
         "art": art,
@@ -326,12 +382,15 @@ def strom_kennzahlen(tarif, art="netz"):
         "gesamt_kwh": round(gesamt, 2),
         "pro_stunde_kwh": round(pro_stunde, 3),
         "pro_stunde_eur": kosten(pro_stunde, 1),
-        "pro_tag_kwh": round(pro_stunde * 24, 2),
-        "pro_tag_eur": kosten(pro_stunde * 24, 24),
-        "pro_monat_kwh": round(pro_stunde * 24 * 30.4375, 1),
-        "pro_monat_eur": kosten(pro_stunde * 24 * 30.4375, 24 * 30.4375),
-        "pro_jahr_kwh": round(pro_stunde * 24 * 365.25, 0),
-        "pro_jahr_eur": kosten(pro_stunde * 24 * 365.25, 24 * 365.25),
+        "pro_tag_kwh": round(pro_tag, 2),
+        "pro_tag_eur": kosten(pro_tag, 24),
+        "pro_monat_kwh": round(pro_monat, 1),
+        "pro_monat_eur": kosten(pro_monat, 24 * 30.4375),
+        "pro_jahr_kwh": round(pro_jahr, 0),
+        "pro_jahr_eur": kosten(pro_jahr, 24 * 365.25),
+        "prognose_basis": prog["basis"] if prog else "letzte24h",
+        "prognose_monate": prog["monate_mit_daten"] if prog else 0,
+        "prognose_tage": prog["tage_gesamt"] if prog else 0,
         "messpunkte": len(deltas),
     }
 
@@ -486,7 +545,15 @@ def zusammenfassung(tarif):
         return sum(d for t, d in diffs if t >= grenze) / dauer
 
     letzter_ts, letzter_wert = letzte
-    pro_stunde = rate(86400) or rate(7 * 86400)
+    prog = prognose(diffs)
+    if prog:
+        pro_stunde, pro_tag = prog["stunde"], prog["tag"]
+        pro_monat, pro_jahr = prog["monat"], prog["jahr"]
+    else:
+        pro_stunde = rate(86400) or rate(7 * 86400)
+        pro_tag = pro_stunde * 24
+        pro_monat = pro_stunde * 24 * 30.4375
+        pro_jahr = pro_stunde * 24 * 365.25
     tag, woche = verbrauch(86400), verbrauch(7 * 86400)
     monat, jahr = verbrauch(30.4375 * 86400), verbrauch(365.25 * 86400)
 
@@ -509,15 +576,18 @@ def zusammenfassung(tarif):
         "pro_stunde_m3": round(pro_stunde, 4),
         "pro_stunde_eur": round(gas.kosten_energie(pro_stunde, tarif)
                                 + gas.grundkosten(1, tarif), 3),
-        "pro_tag_m3": round(pro_stunde * 24, 3),
-        "pro_tag_eur": round(gas.kosten_energie(pro_stunde * 24, tarif)
+        "pro_tag_m3": round(pro_tag, 3),
+        "pro_tag_eur": round(gas.kosten_energie(pro_tag, tarif)
                              + gas.grundkosten(24, tarif), 2),
-        "pro_monat_m3": round(pro_stunde * 24 * 30.4375, 2),
-        "pro_monat_eur": round(gas.kosten_energie(pro_stunde * 24 * 30.4375, tarif)
+        "pro_monat_m3": round(pro_monat, 2),
+        "pro_monat_eur": round(gas.kosten_energie(pro_monat, tarif)
                                + gas.grundkosten(24 * 30.4375, tarif), 2),
-        "pro_jahr_m3": round(pro_stunde * 24 * 365.25, 1),
-        "pro_jahr_eur": round(gas.kosten_energie(pro_stunde * 24 * 365.25, tarif)
+        "pro_jahr_m3": round(pro_jahr, 1),
+        "pro_jahr_eur": round(gas.kosten_energie(pro_jahr, tarif)
                               + gas.grundkosten(24 * 365.25, tarif), 2),
+        "prognose_basis": prog["basis"] if prog else "letzte24h",
+        "prognose_monate": prog["monate_mit_daten"] if prog else 0,
+        "prognose_tage": prog["tage_gesamt"] if prog else 0,
     }
 
 

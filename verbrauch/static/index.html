@@ -54,6 +54,7 @@
           <button data-m="kwh">kWh</button>
           <button data-m="eur">€</button>
         </div>
+        <input type="date" id="zeitraum" class="zeitraum" title="Tag wählen">
         <select id="anzahl">
           <option value="">Standard</option>
           <option value="12">12</option>
@@ -91,6 +92,7 @@
             <button data-m="kwh" class="aktiv">kWh</button>
             <button data-m="eur">€</button>
           </div>
+          <input type="date" id="stromZeitraum" class="zeitraum" title="Tag wählen">
           <select id="stromAnzahl">
             <option value="">Standard</option>
             <option value="12">12</option>
@@ -110,6 +112,13 @@
         <div class="legende" id="stromLegende"></div>
       </div>
       <div class="tooltip versteckt" id="stromTooltip"></div>
+
+      <div class="panelkopf" style="margin-top:18px">
+        <h2>Prognose bei aktuellem Bezug</h2>
+      </div>
+      <div class="prognose" id="stromPrognose"></div>
+      <p class="fuSS">Hochrechnung aus dem durchschnittlichen Netzbezug der letzten 24 h
+        (bzw. 7 Tage), inklusive zeitanteiligem Grundpreis.</p>
 
       <div class="panelkopf" style="margin-top:18px">
         <h2>Stromtarif <span class="tarif-badge offen" id="stromStand">Beispielwerte</span></h2>

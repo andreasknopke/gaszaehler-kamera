@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const DE = (n, d = 2) => (n ?? 0).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d });
 const EUR = (n) => DE(n, 2) + " €";
 
-const zustand = { einheit: "tag", metrik: "m3", anzahl: "" };
+const zustand = { einheit: "tag", metrik: "m3", anzahl: "", zeitraum: "" };
 const BEZEICHNUNG = { stunde: "pro Stunde", tag: "pro Tag", monat: "pro Monat", jahr: "pro Jahr" };
 const EINHEIT_KURZ = { stunde: "Stunde", tag: "Tag", monat: "Monat", jahr: "Jahr" };
 
@@ -387,6 +387,22 @@ function stromTooltipZeigen(e, s) {
   tooltipPosition(e);
 }
 
+function stromPrognoseZeigen(k) {
+  const box = $("#stromPrognose");
+  if (!box) return;
+  if (!k || k.stand_kwh == null) { box.innerHTML = ""; return; }
+  const p = (titel, kwh, eur) =>
+    `<div class="p"><div class="k">${titel}</div>`
+    + `<div class="v">${DE(kwh, kwh < 10 ? 2 : 1)} kWh</div>`
+    + `<div class="e">${EUR(eur)}</div></div>`;
+  box.innerHTML = [
+    p("pro Stunde", k.pro_stunde_kwh, k.pro_stunde_eur),
+    p("pro Tag", k.pro_tag_kwh, k.pro_tag_eur),
+    p("pro Monat", k.pro_monat_kwh, k.pro_monat_eur),
+    p("pro Jahr", k.pro_jahr_kwh, k.pro_jahr_eur),
+  ].join("");
+}
+
 function stromKartenZeigen(k, tarif) {
   const box = $("#stromKarten");
   if (!box) return;
@@ -445,6 +461,7 @@ async function stromLaden() {
   const antwort = await fetch(url);
   const d = await antwort.json();
   stromKartenZeigen(d.kennzahlen, d.tarif);
+  stromPrognoseZeigen(d.kennzahlen);
   stromChartZeichnen(d.spalten, stromZustand.metrik);
 }
 
@@ -716,7 +733,8 @@ function mixZeigen(d) {
 
 async function laden() {
   const url = `/api/uebersicht?einheit=${zustand.einheit}` +
-    (zustand.anzahl ? `&anzahl=${zustand.anzahl}` : "");
+    (zustand.anzahl ? `&anzahl=${zustand.anzahl}` : "") +
+    (zustand.zeitraum ? `&zeitraum=${zustand.zeitraum}` : "");
   const antwort = await fetch(url);
   const daten = await antwort.json();
   tarifZeigen(daten.tarif);
@@ -729,12 +747,27 @@ async function laden() {
   detailZeigen(daten);
 }
 
+function zeitraumAnpassen(feldId, einheit) {
+  const el = $(feldId);
+  if (!el) return;
+  if (einheit === "jahr") {
+    el.disabled = true;
+    el.title = "Für Jahre werden die letzten fünf Jahre gezeigt";
+  } else {
+    el.disabled = false;
+    el.title = einheit === "stunde" ? "Tag wählen"
+      : einheit === "tag" ? "Monat wählen (Tag wird ignoriert)"
+      : "Jahr wählen (Monat/Tag werden ignoriert)";
+  }
+}
+
 function buttons() {
   $("#einheit").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
     zustand.einheit = b.dataset.e; zustand.anzahl = "";
     $("#anzahl").value = "";
     [...e.currentTarget.children].forEach((x) => x.classList.toggle("aktiv", x === b));
+    zeitraumAnpassen("#zeitraum", zustand.einheit);
     laden();
   });
   $("#metrik").addEventListener("click", (e) => {
@@ -744,6 +777,16 @@ function buttons() {
     laden();
   });
   $("#anzahl").addEventListener("change", (e) => { zustand.anzahl = e.target.value; laden(); });
+  const zr = $("#zeitraum");
+  if (zr) {
+    zr.addEventListener("change", (e) => {
+      zustand.zeitraum = e.target.value;
+      zustand.anzahl = "";
+      const a = $("#anzahl"); if (a) a.value = "";
+      laden();
+    });
+    zeitraumAnpassen("#zeitraum", zustand.einheit);
+  }
   $("#korrekturForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const wert = $("#korrekturWert").value;
@@ -765,6 +808,7 @@ function stromButtons() {
     stromZustand.einheit = b.dataset.e; stromZustand.anzahl = "";
     const sa = $("#stromAnzahl"); if (sa) sa.value = "";
     [...e.currentTarget.children].forEach((x) => x.classList.toggle("aktiv", x === b));
+    zeitraumAnpassen("#stromZeitraum", stromZustand.einheit);
     stromLaden();
   });
   const sa_art = $("#stromArt");
@@ -783,6 +827,16 @@ function stromButtons() {
   });
   const sa = $("#stromAnzahl");
   if (sa) sa.addEventListener("change", (e) => { stromZustand.anzahl = e.target.value; stromLaden(); });
+  const szr = $("#stromZeitraum");
+  if (szr) {
+    szr.addEventListener("change", (e) => {
+      stromZustand.zeitraum = e.target.value;
+      stromZustand.anzahl = "";
+      const a = $("#stromAnzahl"); if (a) a.value = "";
+      stromLaden();
+    });
+    zeitraumAnpassen("#stromZeitraum", stromZustand.einheit);
+  }
 }
 
 buttons();

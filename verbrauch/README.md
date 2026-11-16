@@ -125,6 +125,24 @@ static/                 HTML, CSS, JavaScript der Web-Ansicht
 Nicht im Repo (werden zur Laufzeit angelegt): `config.json`, `daten.db`,
 `fotos/`, `zellen/`, `bank/`, `logs/`.
 
+## Prognose und Zeitraumauswahl
+
+Gas- und Stromdiagramm haben einen **Prognose**-Block: aus dem Durchschnitt
+der letzten 24 Stunden (ersatzweise 7 Tage) wird auf Stunde, Tag, Monat und
+Jahr hochgerechnet, inklusive zeitanteiligem Grundpreis.
+
+Neben den Einheiten (Stündlich/Täglich/Monatlich/Jährlich) gibt es einen
+**Zeitraum-Wähler**:
+
+| Einheit | Datum wählt |
+|---|---|
+| Stündlich | die 24 Stunden dieses **Tages** |
+| Täglich | die Tage dieses **Monats** |
+| Monatlich | die 12 Monate dieses **Jahres** |
+| Jährlich | die letzten fünf Jahre (kein Datum nötig) |
+
+Ohne Auswahl zeigt das Diagramm die letzten N Perioden (Auswahlfeld daneben).
+
 ## Strommix Deutschland
 
 Der Abschnitt *Strommix Deutschland* zeigt die CO₂-Intensität und die

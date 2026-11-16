@@ -80,6 +80,34 @@ def periodenliste(einheit, anzahl):
     return out
 
 
+def periodenliste_fuer(einheit, zeitraum):
+    """Perioden fuer einen gewaehlten Tag/Monat/Jahr (Datum als YYYY-MM-DD).
+
+    stunde -> die 24 Stunden dieses Tages
+    tag    -> die Tage dieses Monats
+    monat  -> die 12 Monate dieses Jahres
+    jahr   -> die letzten fuenf Jahre
+    """
+    try:
+        d = datetime.strptime(str(zeitraum)[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+    if einheit == "stunde":
+        start = d.replace(hour=0, minute=0, second=0, microsecond=0)
+        return [(start + timedelta(hours=h)).strftime("%Y-%m-%d %H:00") for h in range(24)]
+    if einheit == "tag":
+        start = d.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        naechster = (start + timedelta(days=32)).replace(day=1)
+        aus, lauf = [], start
+        while lauf < naechster:
+            aus.append(lauf.strftime("%Y-%m-%d"))
+            lauf += timedelta(days=1)
+        return aus
+    if einheit == "monat":
+        return [f"{d.year:04d}-{m:02d}" for m in range(1, 13)]
+    return periodenliste("jahr", 5)
+
+
 KORREKTUR_QUELLEN = ("start", "manuell")
 
 
@@ -176,7 +204,7 @@ def _deltas():
             _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN)]
 
 
-def serie(einheit, anzahl, tarif):
+def serie(einheit, anzahl, tarif, zeitraum=None):
     """Verbrauch (m3/kWh/EUR) je Periode aus der Messreihe.
 
     Zuwaechse werden gleichmaessig auf die Perioden verteilt, die sie
@@ -193,7 +221,8 @@ def serie(einheit, anzahl, tarif):
             pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
 
     spalten = []
-    for schluessel in periodenliste(einheit, anzahl):
+    for schluessel in (periodenliste_fuer(einheit, zeitraum)
+                       or periodenliste(einheit, anzahl)):
         m3 = round(pro_periode.get(schluessel, 0.0), 3)
         kwh = gas.kwh(m3, tarif)
         std = EINHEITEN[einheit]["std_pro_strich"]
@@ -232,7 +261,7 @@ def strom_zuwaechse(art="netz"):
     return _zuwaechse(reihe, 100.0, ("anker",))
 
 
-def strom_serie(einheit, anzahl, tarif, art="netz"):
+def strom_serie(einheit, anzahl, tarif, art="netz", zeitraum=None):
     """Netzbezug bzw. Hausverbrauch (kWh und EUR) je Periode."""
     pro_periode = {}
     for t0, t1, diff in strom_zuwaechse(art):
@@ -240,7 +269,8 @@ def strom_serie(einheit, anzahl, tarif, art="netz"):
             pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
     ap = float(tarif.get("arbeitspreis_ct_kwh") or 0)
     spalten = []
-    for schluessel in periodenliste(einheit, anzahl):
+    for schluessel in (periodenliste_fuer(einheit, zeitraum)
+                       or periodenliste(einheit, anzahl)):
         kwh = round(pro_periode.get(schluessel, 0.0), 3)
         std = EINHEITEN[einheit]["std_pro_strich"]
         spalten.append({
@@ -266,6 +296,23 @@ def strom_kennzahlen(tarif, art="netz"):
             monat += diff
         if d.year == jetzt.year:
             jahr += diff
+    def rate(sekunden):
+        """Mittlerer Bezug in kWh/h ueber das Zeitfenster."""
+        grenze = time.time() - sekunden
+        im_fenster = [(t, d) for t, d in deltas if t >= grenze]
+        if not im_fenster:
+            return 0.0
+        dauer = (time.time() - max(grenze, im_fenster[0][0])) / 3600.0
+        if dauer < 0.15:                              # unter 9 min: zu ungenau
+            return 0.0
+        return sum(d for _t, d in im_fenster) / dauer
+
+    grund = float(tarif.get("grundpreis_eur_monat") or 0)
+
+    def kosten(kwh, stunden):
+        return round(kwh * ap / 100 + grund * stunden / (24 * 30.4375), 2)
+
+    pro_stunde = rate(86400) or rate(7 * 86400)
     ts_letzte, stand = strom.letzte(art)
     return {
         "art": art,
@@ -277,6 +324,14 @@ def strom_kennzahlen(tarif, art="netz"):
         "monat_kwh": round(monat, 2), "monat_eur": round(monat * ap / 100, 2),
         "jahr_kwh": round(jahr, 2), "jahr_eur": round(jahr * ap / 100, 2),
         "gesamt_kwh": round(gesamt, 2),
+        "pro_stunde_kwh": round(pro_stunde, 3),
+        "pro_stunde_eur": kosten(pro_stunde, 1),
+        "pro_tag_kwh": round(pro_stunde * 24, 2),
+        "pro_tag_eur": kosten(pro_stunde * 24, 24),
+        "pro_monat_kwh": round(pro_stunde * 24 * 30.4375, 1),
+        "pro_monat_eur": kosten(pro_stunde * 24 * 30.4375, 24 * 30.4375),
+        "pro_jahr_kwh": round(pro_stunde * 24 * 365.25, 0),
+        "pro_jahr_eur": kosten(pro_stunde * 24 * 365.25, 24 * 365.25),
         "messpunkte": len(deltas),
     }
 
@@ -303,7 +358,7 @@ def wasser_zuwaechse():
     return _zuwaechse(reihe, 20.0, ("anker",))
 
 
-def wasser_serie(einheit, anzahl, tarif):
+def wasser_serie(einheit, anzahl, tarif, zeitraum=None):
     """Wasserverbrauch (m3 und EUR) je Periode."""
     pro_periode = {}
     for t0, t1, diff in wasser_zuwaechse():
@@ -312,7 +367,8 @@ def wasser_serie(einheit, anzahl, tarif):
     preis = (float(tarif.get("wasserpreis_eur_m3") or 0)
              + float(tarif.get("abwasser_eur_m3") or 0))
     spalten = []
-    for schluessel in periodenliste(einheit, anzahl):
+    for schluessel in (periodenliste_fuer(einheit, zeitraum)
+                       or periodenliste(einheit, anzahl)):
         m3 = round(pro_periode.get(schluessel, 0.0), 2)
         std = EINHEITEN[einheit]["std_pro_strich"]
         spalten.append({
@@ -580,9 +636,11 @@ class Handler(BaseHTTPRequestHandler):
             if einheit not in EINHEITEN:
                 einheit = "tag"
             anzahl = int(frage.get("anzahl", [EINHEITEN[einheit]["anzahl"]])[0])
+            zeitraum = (frage.get("zeitraum", [""])[0] or None)
             return self._json({
                 "einheit": einheit,
-                "spalten": serie(einheit, anzahl, tarif),
+                "zeitraum": zeitraum,
+                "spalten": serie(einheit, anzahl, tarif, zeitraum),
                 "kennzahlen": zusammenfassung(tarif),
                 "tarif": tarif,
                 "fotos": fotos(),
@@ -621,10 +679,12 @@ class Handler(BaseHTTPRequestHandler):
             if einheit not in EINHEITEN:
                 einheit = "tag"
             anzahl = int(frage.get("anzahl", [EINHEITEN[einheit]["anzahl"]])[0])
+            zeitraum = (frage.get("zeitraum", [""])[0] or None)
             tarif_w = (cfg.get("wasser") or {}).get("tarif") or {}
             return self._json({
                 "einheit": einheit,
-                "spalten": wasser_serie(einheit, anzahl, tarif_w),
+                "zeitraum": zeitraum,
+                "spalten": wasser_serie(einheit, anzahl, tarif_w, zeitraum),
                 "kennzahlen": wasser_kennzahlen(tarif_w),
                 "tarif": tarif_w,
             })
@@ -636,11 +696,13 @@ class Handler(BaseHTTPRequestHandler):
             if art not in strom.ARTEN:
                 art = "netz"
             anzahl = int(frage.get("anzahl", [EINHEITEN[einheit]["anzahl"]])[0])
+            zeitraum = (frage.get("zeitraum", [""])[0] or None)
             tarif_s = (cfg.get("strom") or {}).get("tarif") or {}
             return self._json({
                 "einheit": einheit,
                 "art": art,
-                "spalten": strom_serie(einheit, anzahl, tarif_s, art),
+                "zeitraum": zeitraum,
+                "spalten": strom_serie(einheit, anzahl, tarif_s, art, zeitraum),
                 "kennzahlen": strom_kennzahlen(tarif_s, art),
                 "tarif": tarif_s,
             })

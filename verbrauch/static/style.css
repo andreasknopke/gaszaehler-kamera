@@ -176,3 +176,11 @@ footer { max-width: 1240px; margin: 0 auto; padding: 0 26px 30px; color: #5c6875
 .mix-balken > div { height: 100%; transition: width .3s; }
 .mix-legende { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12.5px; color: var(--dezent); }
 .mix-legende i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+
+/* Zeitraum-Waehler in den Diagramm-Steuerungen */
+.zeitraum {
+  background: #11161f; color: #cdd9e5; border: 1px solid var(--rand);
+  border-radius: 8px; padding: 5px 8px; font-size: 12.5px;
+  color-scheme: dark;
+}
+.zeitraum:disabled { opacity: .4; }

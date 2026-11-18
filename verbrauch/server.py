@@ -196,46 +196,28 @@ def perioden_anteile(t0, t1, wert, einheit):
     return anteile
 
 
-def _bereinigen(reihe, anker_quellen, tol=0.05, fenster=8):
-    """Fehlablesungen rueckwirkend entfernen.
-
-    Eine Spitze (ploetzlich hoeherer Wert), die wenige Messungen spaeter
-    wieder zurueckfaellt, ist keine echte Zaehlung: Ein Gaszaehler laeuft
-    nur vorwaerts. Solche Punkte werden verworfen. Ohne das zieht ein
-    einzelner Ausreisser den Bezugswert dauerhaft nach oben, und jede
-    spaetere echte Messung gilt als "rueckwaerts" und faellt weg.
-    """
-    werte = [z[1] for z in reihe]
-    ergebnis = []
-    for i, zeile in enumerate(reihe):
-        ts, wert, quelle = zeile
-        if quelle in anker_quellen:
-            ergebnis.append(zeile)
-            continue
-        zukunft = werte[i + 1:i + 1 + fenster]
-        if zukunft and wert > min(zukunft) + tol:
-            continue                                  # Spitze: faellt gleich zurueck
-        ergebnis.append(zeile)
-    return ergebnis
-
-
-def _zuwaechse(reihe, max_diff, anker_quellen):
+def _zuwaechse(reihe, max_diff, anker_quellen, max_pro_minute=0.12):
     """(von, bis, zuwachs) aus einer Zaehlerreihe.
 
-    Zuerst werden Fehlablesungen entfernt (_bereinigen), dann bleibt bei
-    einem Rueckwaerts-Sprung der letzte gueltige Wert stehen, statt den
-    anschliessenden "Erholungssprung" als Verbrauch zu buchen.
+    Jeder Messwert zieht den Bezug weiter - ein Fehlgriff (OCR verliest eine
+    Ziffer, z. B. 8546 -> 8535) kostet so nur *einen* Schritt und blockiert
+    nicht die ganze weitere Reihe.
+
+    Uebersprungen wird ein Schritt nur, wenn er physikalisch nicht sein kann:
+    mehr Zuwachs, als in der verstrichenen Zeit maximal durch den Zaehler
+    passt (max_pro_minute). Das faengt sowohl einen Ausreisser nach oben als
+    auch einen Ruecksprung ab - und verhindert, dass ein kurzer Ausreisser
+    plus Rueckkehr als Verbrauch gezaehlt wird.
     """
-    reihe = _bereinigen(reihe, anker_quellen)
     ergebnis, letzter = [], None
     for ts, wert, quelle in reihe:
         if letzter is None or quelle in anker_quellen:
             letzter = (ts, wert)
             continue
-        if wert < letzter[1]:
-            continue                                  # Rueckwaerts = Fehlablesung
         diff = wert - letzter[1]
-        if diff <= max_diff:
+        sekunden = max(1, ts - letzter[0])
+        grenze = min(max_diff, max_pro_minute * sekunden / 60.0 + 0.05)
+        if 0 <= diff <= grenze:
             ergebnis.append((letzter[0], ts, diff))
         letzter = (ts, wert)
     return ergebnis
@@ -249,7 +231,7 @@ def _deltas():
     finally:
         con.close()
     return [(ts, diff) for _t0, ts, diff in
-            _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN)]
+            _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN, 0.12)]
 
 
 def serie(einheit, anzahl, tarif, zeitraum=None):
@@ -264,7 +246,7 @@ def serie(einheit, anzahl, tarif, zeitraum=None):
         reihe = con.execute("SELECT ts, m3, quelle FROM messungen ORDER BY ts").fetchall()
     finally:
         con.close()
-    for t0, t1, diff in _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN):
+    for t0, t1, diff in _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN, 0.12):
         for schluessel, anteil in perioden_anteile(t0, t1, diff, einheit).items():
             pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
 
@@ -306,7 +288,7 @@ def strom_zuwaechse(art="netz"):
             f"SELECT ts, kwh, quelle FROM {strom.tabelle(art)} ORDER BY ts").fetchall()
     finally:
         con.close()
-    return _zuwaechse(reihe, 100.0, ("anker",))
+    return _zuwaechse(reihe, 100.0, ("anker",), 0.35)
 
 
 def strom_serie(einheit, anzahl, tarif, art="netz", zeitraum=None):
@@ -414,7 +396,7 @@ def wasser_zuwaechse():
         reihe = con.execute("SELECT ts, m3, quelle FROM wasser ORDER BY ts").fetchall()
     finally:
         con.close()
-    return _zuwaechse(reihe, 20.0, ("anker",))
+    return _zuwaechse(reihe, 20.0, ("anker",), 0.10)
 
 
 def wasser_serie(einheit, anzahl, tarif, zeitraum=None):

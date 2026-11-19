@@ -51,6 +51,17 @@ def zellen_aus(im):
     return out
 
 
+def _nahe_uebertrag(wert, gewicht):
+    """Steht die Walze kurz vor (oder direkt nach) dem Uebertrag?
+
+    Eine Walze mit Gewicht w springt nur, wenn die niedrigeren Stellen
+    fast voll sind (z. B. Zehnerwalze bei 8559,9). Ein Sprung bei 8550,2
+    ist dagegen ein Bildfehler.
+    """
+    rest = round(abs(float(wert)) % gewicht, 6)
+    return rest >= 0.85 * gewicht
+
+
 def _aehnlichkeit(a, b):
     if a.shape != b.shape:
         return -1.0
@@ -215,6 +226,14 @@ def schritt(zellen, con, jetzt=None, bank=None, zellen2=None, rollend=()):
             # beim naechsten Bild klar als Schritt erkannt.
             continue
 
+        # Hoehere Walzen (10/100/1000/10000 m3) laufen ausschliesslich beim
+        # Uebertrag weiter - und den zaehlt bereits die Einerwalze. Sie
+        # werden deshalb nur als Referenz nachgefuehrt, nie gebucht.
+        # (Ein Sprung der Zehnerwalze bei 8550,2 hatte +10 m3 gebucht.)
+        if GEWICHTE[i] >= 10:
+            speichere_zelle(i, bild)
+            continue
+
         verdacht.append(i)
 
         # Rollt die Walze noch? Dann in diesem Lauf nicht buchen.
@@ -228,6 +247,12 @@ def schritt(zellen, con, jetzt=None, bank=None, zellen2=None, rollend=()):
                 speichere_pending(i, bild)
                 continue
             loesche_pending(i)
+
+        if GEWICHTE[i] >= 1 and not _nahe_uebertrag(basis, GEWICHTE[i]):
+            notiz(con, f"{time.strftime('%H:%M')} Walze {i} sprang bei "
+                       f"{basis:.3f} - kein Uebertrag, ignoriert")
+            speichere_zelle(i, bild)
+            continue
 
         aenderungen.append((i, bild))
 

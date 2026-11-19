@@ -139,40 +139,68 @@ ABLAUF_WASSER = 93600        # Wasser: taegliche Messung -> 26 Stunden
 
 
 def gas_leistung_kurz(minuten=20):
-    """Momentaner Gasfluss in m3/h aus den letzten Ablesungen.
+    """Momentaner Gasfluss in m3/h - gleiche Filterung wie die Webseite.
 
-    Die Kamera liest alle 2 Minuten; ueber ein 20-Minuten-Fenster ist der Zuwachs
-    aussagekraeftig genug fuer eine Live-Anzeige. Korrektur- und Startwerte
-    zaehlen nicht als Verbrauch.
+    Die Kamera liest alle 2 Minuten. Ein einzelner OCR-Fehlgriff (rollende
+    Einerwalze, +1,0 m3) darf hier nicht als Spitze auftauchen, deshalb werden
+    nur die physikalisch moeglichen Zuwaechse summiert (server._zuwaechse,
+    0,12 m3/min) und durch die Fensterdauer geteilt - nicht die Differenz
+    erster/letzter Messwert gebildet.
     """
+    grenze = int(time.time() - minuten * 60)
     con = gas.db()
     try:
         reihe = con.execute(
             "SELECT ts, m3, quelle FROM messungen WHERE ts >= ? ORDER BY ts",
-            (int(time.time() - minuten * 60),)).fetchall()
+            (grenze,)).fetchall()
     finally:
         con.close()
-    reihe = [(ts, m3) for ts, m3, quelle in reihe if quelle not in ("start", "manuell")]
     if len(reihe) < 2:
         return 0.0
-    (t0, m0), (t1, m1) = reihe[0], reihe[-1]
-    if t1 <= t0:
+    dauer = (reihe[-1][0] - reihe[0][0]) / 3600.0
+    if dauer <= 0:
         return 0.0
-    return round(max(0.0, (m1 - m0) / ((t1 - t0) / 3600.0)), 3)
+    zu = server._zuwaechse(reihe, 5.0, server.KORREKTUR_QUELLEN, 0.12)
+    return round(max(0.0, sum(d for _t0, _t1, d in zu) / dauer), 3)
 
 
-MAX_SPRUNG_M3 = 1.0   # mehr als 1 m3 zwischen zwei Messungen ist physikalisch unmoeglich
+MEDIAN_N = 5              # Anzahl Messwerte fuer den Median-Zaehlerstand
+RUECKWAERTS_M3 = 0.2      # so weit darf der veroeffentlichte Stand je Lauf sinken
+VORWAERTS_PRO_MIN = 0.12  # m3/min - physikalische Obergrenze der Zaehlerdrehung
+
+
+def stand_median(fallback=None):
+    """Median der letzten Messwerte als Zaehlerstand.
+
+    Die Einerwalze rollt mechanisch; die Kamera liest sie dabei gelegentlich
+    eine Ziffer weiter (+1,0 m3). Ein solcher Einzelausreisser verschwindet im
+    Median ueber MEDIAN_N Messwerte, ein echter Zuwachs erscheint mit hoechstens
+    zwei Messungen Verzoegerung.
+    """
+    con = gas.db()
+    try:
+        reihe = con.execute(
+            "SELECT m3 FROM messungen WHERE quelle NOT IN ('start', 'manuell') "
+            "ORDER BY ts DESC LIMIT ?", (MEDIAN_N,)).fetchall()
+    finally:
+        con.close()
+    werte = sorted(float(z[0]) for z in reihe if z[0] is not None)
+    if not werte:
+        return fallback
+    return werte[len(werte) // 2]
 
 
 def _stand_plausibel(wert):
-    """Nur plausible Zaehlerstaende veroeffentlichen.
+    """Plausiblen Zaehlerstand veroeffentlichen (weiches Klemmen).
 
-    HA wertet jeden Rueckwaertssprung eines total_increasing-Sensors als
-    Zaehlerreset und zaehlt dann den KOMPLETTEN Zaehlerstand als Verbrauch.
-    Rueckwaerts-Wackler (< 0.05 m3) und Vorwaerts-Ausreisser (> MAX_SPRUNG_M3 pro
-    Messung) werden deshalb verworfen; gemeldet wird der letzte gute Wert.
-    Die fruehere Fassung mit max(wert, vorher) hat einen einmaligen OCR-Ausreisser
-    dauerhaft festgeschrieben - daher der 11-m3-Sprung.
+    HA zaehlt bei einem total_increasing-Sensor Vorwaertsspruenge als
+    Verbrauch und Rueckwaertsspruenge als negatives Delta. Deshalb:
+    - Vorwaerts ist nur erlaubt, was der Zaehler in der verstrichenen Zeit
+      gedreht haben kann (VORWAERTS_PRO_MIN) plus 0,25 m3 Reserve.
+    - Rueckwaerts wird nachgefuehrt, aber hoechstens RUECKWAERTS_M3 je Lauf.
+      Ein erkannter Fehlgriff ist damit binnen weniger Minuten weg, ohne dass
+      der Stand dauerhaft falsch stehen bleibt (die frueheren Fassungen mit
+      max() bzw. fester 1,0-m3-Grenze haben den +1,0-m3-Fehlgriff eingefroren).
     """
     if wert is None:
         return None
@@ -189,19 +217,26 @@ def _stand_plausibel(wert):
             except (TypeError, ValueError):
                 return None
 
-        def setze(schluessel, zahl):
+        def setze(schluessel, wert_):
             con.execute("INSERT OR REPLACE INTO zustand (schluessel, wert) VALUES (?, ?)",
-                        (schluessel, "%.3f" % zahl))
+                        (schluessel, wert_ if isinstance(wert_, str) else "%.3f" % wert_))
             con.commit()
 
         letzter = hole("mqtt_stand_ok")
-        if letzter is None:
+        ts_letzter = hole("mqtt_stand_ts")
+        jetzt = time.time()
+        if letzter is None or ts_letzter is None:      # erster Lauf: uebernehmen
             setze("mqtt_stand_ok", wert)
+            setze("mqtt_stand_ts", "%.0f" % jetzt)
             return wert
-        schritt = wert - letzter
-        if schritt < -0.05 or schritt > MAX_SPRUNG_M3:
-            return letzter
+        minuten = max(2.0, (jetzt - ts_letzter) / 60.0)
+        grenze = VORWAERTS_PRO_MIN * minuten + 0.25
+        if wert > letzter + grenze:
+            return letzter                              # Fehlgriff nach oben
+        if wert < letzter - RUECKWAERTS_M3:
+            wert = letzter - RUECKWAERTS_M3             # sanft nachfuehren
         setze("mqtt_stand_ok", wert)
+        setze("mqtt_stand_ts", "%.0f" % jetzt)
         return wert
     finally:
         con.close()
@@ -219,7 +254,7 @@ def werte():
     except (OSError, OverflowError):
         letzte = ""
     return {
-        "zaehlerstand_m3": _stand_plausibel(zus.get("stand")),
+        "zaehlerstand_m3": _stand_plausibel(stand_median(zus.get("stand"))),
         "verbrauch_heute_m3": zus.get("tag_m3"),
         "verbrauch_woche_m3": zus.get("woche_m3"),
         "verbrauch_monat_m3": zus.get("monat_m3"),

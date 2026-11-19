@@ -190,17 +190,15 @@ def stand_median(fallback=None):
     return werte[len(werte) // 2]
 
 
-def _stand_plausibel(wert):
+def _stand_plausibel(wert, schluessel="mqtt_stand", pro_minute=VORWAERTS_PRO_MIN):
     """Plausiblen Zaehlerstand veroeffentlichen (weiches Klemmen).
 
     HA zaehlt bei einem total_increasing-Sensor Vorwaertsspruenge als
     Verbrauch und Rueckwaertsspruenge als negatives Delta. Deshalb:
     - Vorwaerts ist nur erlaubt, was der Zaehler in der verstrichenen Zeit
-      gedreht haben kann (VORWAERTS_PRO_MIN) plus 0,25 m3 Reserve.
-    - Rueckwaerts wird nachgefuehrt, aber hoechstens RUECKWAERTS_M3 je Lauf.
-      Ein erkannter Fehlgriff ist damit binnen weniger Minuten weg, ohne dass
-      der Stand dauerhaft falsch stehen bleibt (die frueheren Fassungen mit
-      max() bzw. fester 1,0-m3-Grenze haben den +1,0-m3-Fehlgriff eingefroren).
+      gedreht haben kann (pro_minute) plus 0,25 Reserve.
+    - Rueckwaerts wird *nie* veroeffentlicht (fester Stand), weil Home
+      Assistant daraus ein negatives Delta macht.
     """
     if wert is None:
         return None
@@ -222,21 +220,26 @@ def _stand_plausibel(wert):
                         (schluessel, wert_ if isinstance(wert_, str) else "%.3f" % wert_))
             con.commit()
 
-        letzter = hole("mqtt_stand_ok")
-        ts_letzter = hole("mqtt_stand_ts")
+        letzter = hole(f"{schluessel}_ok")
+        ts_letzter = hole(f"{schluessel}_ts")
         jetzt = time.time()
         if letzter is None or ts_letzter is None:      # erster Lauf: uebernehmen
-            setze("mqtt_stand_ok", wert)
-            setze("mqtt_stand_ts", "%.0f" % jetzt)
+            setze(f"{schluessel}_ok", wert)
+            setze(f"{schluessel}_ts", "%.0f" % jetzt)
             return wert
         minuten = max(2.0, (jetzt - ts_letzter) / 60.0)
-        grenze = VORWAERTS_PRO_MIN * minuten + 0.25
+        grenze = pro_minute * minuten + 0.25
         if wert > letzter + grenze:
             return letzter                              # Fehlgriff nach oben
-        if wert < letzter - RUECKWAERTS_M3:
-            wert = letzter - RUECKWAERTS_M3             # sanft nachfuehren
-        setze("mqtt_stand_ok", wert)
-        setze("mqtt_stand_ts", "%.0f" % jetzt)
+        if wert < letzter:
+            # Nie rueckwaerts veroeffentlichen: Home Assistant macht aus
+            # jedem Rueckgang ein negatives Delta (sichtbar als negativer
+            # Gasfluss im Energie-Dashboard). Korrekturen nach unten laufen
+            # ueber den echten Zaehlerstand - der steigt ja weiter und holt
+            # den veroeffentlichten Wert von selbst ein.
+            return letzter
+        setze(f"{schluessel}_ok", wert)
+        setze(f"{schluessel}_ts", "%.0f" % jetzt)
         return wert
     finally:
         con.close()
@@ -290,7 +293,9 @@ def wasser_werte():
     except (OSError, OverflowError):
         iso = ""
     return {
-        "stand_m3": zus.get("stand_m3"),
+        # Auch fuer Wasser nie rueckwaerts veroeffentlichen (negatives Delta
+        # im HA-Energie-Dashboard). Hoechstens 0,10 m3/min sind plausibel.
+        "stand_m3": _stand_plausibel(zus.get("stand_m3"), "mqtt_wasser_stand", 0.10),
         "tag_m3": summe(86400),
         "leistung_aktuell_m3h": round(summe(1800) * 2, 3),
         "woche_m3": summe(7 * 86400),

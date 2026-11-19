@@ -50,6 +50,19 @@ def _zustand_setzen(con, schluessel, wert):
     con.commit()
 
 
+def durchfluss(con, fenster_minuten=60):
+    """Mittlerer Verbrauch der letzten Stunde in m3/h (None ohne Daten)."""
+    grenze = int(time.time() - fenster_minuten * 60)
+    reihe = con.execute("SELECT ts, m3 FROM messungen WHERE ts >= ? ORDER BY ts",
+                        (grenze,)).fetchall()
+    if len(reihe) < 2:
+        return None
+    (t0, m0), (t1, m1) = reihe[0], reihe[-1]
+    if t1 <= t0 or m1 < m0:
+        return None
+    return max(0.0, min(6.0, (m1 - m0) / ((t1 - t0) / 3600.0)))
+
+
 def foto_noetig():
     fotos = sorted(FOTO_DIR.glob("zaehler-*.jpg"))
     return time.time() - (fotos[-1].stat().st_mtime if fotos else 0) > 3600
@@ -205,16 +218,28 @@ def main():
             if gelesen is not None:
                 _zustand_setzen(con, "letzte_ocr", gelesen)
 
+            # Erwarteter Zuwachs seit der letzten Messung. Der aktuelle
+            # Durchfluss ist bekannt - ein Sprung um eine ganze
+            # Vorkommastelle ist damit unplausibel, solange der Stream
+            # nicht laenger ausgefallen ist (dann waechst die Toleranz mit
+            # der verstrichenen Zeit).
+            rate = durchfluss(con) or 0.0
+            erwartet = rate * minuten / 60.0
+            toleranz = min(2.0, max(0.25, 3.0 * erwartet))
+            unten = max(1.0, toleranz)
+
             if komplett:
-                if gelesen < wert - 0.02 and not stabil:
+                if (gelesen < wert - 0.02 or gelesen > wert + toleranz) and not stabil:
                     # Ein Gaszaehler laeuft nicht rueckwaerts: eine einmalige
                     # kleinere Ablesung ist eine Fehlablesung und wird
                     # verworfen. Meldet die OCR denselben Wert zweimal, ist es
                     # eine echte Korrektur (falsch gezaehlter Schritt).
                     tracker.notiz(con, f"{time.strftime('%H:%M')} Ablesung "
-                                       f"{ablesung} liegt unter dem Stand "
-                                       f"{wert:.3f} - als Fehlablesung verworfen")
-                    log(f"Rueckwaerts-Ablesung verworfen: {ablesung} < {wert:.3f}")
+                                       f"{ablesung} passt nicht zur Erwartung "
+                                       f"({wert:.3f} + max. {toleranz:.2f} m3 in "
+                                       f"{minuten:.0f} min) - verworfen")
+                    log(f"Ablesung verworfen: {ablesung} vs {wert:.3f} "
+                        f"(Toleranz +{toleranz:.2f} m3, Durchfluss {rate:.2f} m3/h)")
                 else:
                     if abs(gelesen - wert) > 0.0015:
                         tracker.setze_basiswert(con, gelesen)
@@ -227,7 +252,7 @@ def main():
                 abweichung = wert - gelesen
                 if -0.0005 <= abweichung < aufloesung + 0.0005:
                     quelle = "ablesung"            # Ablesung bestaetigt die Zaehlung
-                elif abs(abweichung) <= max(2 * aufloesung, 1.0) and (
+                elif -toleranz <= abweichung <= unten and (
                         abweichung <= 0.02 or stabil):
                     # Kleine Abweichung: auf die gelesene Stelle einrasten.
                     # (Der Rahmen max(2*A, 1 m3) laesst Korrekturen bis zu

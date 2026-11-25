@@ -288,6 +288,46 @@ rest:
 Der REST-Weg erzeugt Entitäten, aber kein zusammenhängendes Gerät — dafür
 braucht es MQTT-Discovery (A) oder eine eigene Integration.
 
+## Kamera-Wächter
+
+Die Kamera kann ihren Encoder aufhängen: Sie antwortet dann noch auf Ping und
+Web-Oberfläche, liefert im Stream aber nur leere Rahmen (Nullbytes). Der Viewer
+zeigt weiter das letzte Bild, die Ablesung steht — so blieb der Zähler am
+24.11.2026 fast 20 Stunden stehen.
+
+`kamera_waechter.py` läuft alle 5 Minuten per Cron und greift ein:
+
+| Lage | Reaktion |
+|---|---|
+| Bild jünger als 15 Minuten | nichts |
+| Viewer antwortet nicht | Viewer neu starten |
+| Bild steht, Kamera antwortet | Kamera neu starten (`param.cgi?cmd=reboot`) |
+| Kamera antwortet nicht | nur melden (Netz/Strom prüfen) |
+
+Neustarts liegen mindestens 30 Minuten auseinander; nach drei erfolglosen
+Versuchen wird 6 Stunden gewartet. Jeder Eingriff und jede Erholung steht in
+`logs/waechter.log` und als Notiz in der Web-Ansicht.
+
+Prüfen, ohne einzugreifen:
+
+    python3 kamera_waechter.py --status     # Bildalter, Erreichbarkeit, Versuche
+    python3 kamera_waechter.py --trocken    # Eingriffe nur anzeigen
+
+Damit der Wächter den Viewer notfalls selbst starten kann, steht in
+`config.json` unter `kamera` ein `viewer`-Block (Port, Kamera, Drehung, Zoom):
+
+    "viewer": {"port": 8099, "kamera": "192.168.188.43",
+               "drehen": 180, "zoom": "110,250,680,175", "scale": 2}
+
+Cron-Eintrag (legt `./einrichten.sh` an):
+
+    */5 * * * * cd .../verbrauch && /usr/bin/python3 kamera_waechter.py >> logs/waechter.log 2>&1
+
+Zusätzlich speichert `sample.py` keine Messung, wenn das Kamerabild älter als
+drei Minuten ist — ein stehender Stream erzeugt so keine hundertfachen
+gleichen Werte mehr. Nach einem Ausfall holt die nächste bestätigte Ablesung
+den Zählerstand nach; die Differenz wird über die Ausfallzeit verteilt.
+
 ## Häufige Fälle
 
 * **`Zählerfenster nicht gefunden`** – Kamera hat sich verstellt oder das

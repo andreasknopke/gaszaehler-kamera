@@ -3,7 +3,14 @@
     "url_ansicht": "http://localhost:8099/frame.jpg",
     "url_direkt": "http://192.168.188.43/cgi-bin/hi3510/snap.cgi?&-getstream&-chn=11",
     "drehen": 180,
-    "drehen_ansicht": 0
+    "drehen_ansicht": 0,
+    "viewer": {
+      "port": 8099,
+      "kamera": "192.168.188.43",
+      "drehen": 180,
+      "zoom": "110,250,680,175",
+      "scale": 2
+    }
   },
   "tarif": {
     "anbieter": "",

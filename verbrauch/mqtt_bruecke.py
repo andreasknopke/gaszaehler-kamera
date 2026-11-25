@@ -236,7 +236,7 @@ def _stand_plausibel(wert, schluessel="mqtt_stand", pro_minute=VORWAERTS_PRO_MIN
             # einmaliger Fehlgriff bleibt damit draussen.
             kandidat = hole(f"{schluessel}_kandidat")
             ts_kandidat = hole(f"{schluessel}_kandidat_ts")
-            if (kandidat is not None and abs(kandidat - wert) < 0.001
+            if (kandidat is not None and abs(kandidat - wert) <= 0.02
                     and ts_kandidat is not None and jetzt - ts_kandidat <= 1200
                     and wert - letzter <= max_sprung):
                 setze(f"{schluessel}_kandidat", "")

@@ -111,11 +111,15 @@ def ablesung_aus_wert(wert):
     return ziffern.text(ziffern_liste)
 
 
-def ocr_ablesung(cfg):
+def ocr_ablesung(cfg, erwartet=None):
     """RapidOCR als Rueckfallebene, wenn die Lernbank unsicher ist.
 
     Laeuft im eigenen venv (onnxruntime liegt nicht im System-Python).
     Rueckgabe: (ziffern, wert, aufloesung) oder None.
+
+    `erwartet` ist der gezaehlte Wert. Er dient nur dazu, eine einzelne
+    offene Stelle zu ergaenzen (siehe unten) - nie dazu, das Ergebnis zu
+    ersetzen.
     """
     o = cfg.get("ocr") or {}
     if not o.get("aktiv"):
@@ -138,12 +142,32 @@ def ocr_ablesung(cfg):
 
     liste = daten.get("ziffern") or []
     if len(liste) != 8:
+        log("OCR verworfen (nicht 8 Stellen):", liste)
         return None
     gewichte = ziffern.GEWICHTE
     erste = next((i for i, z in enumerate(liste) if z is None), None)
     if erste is None:
         return liste, sum(z * g for z, g in zip(liste, gewichte)), gewichte[-1]
     if any(z is not None for z in liste[erste:]):
+        # Luecke mitten drin. Die Zehntelwalze steht bei laufendem Verbrauch
+        # regelmaessig zwischen zwei Ziffern und wird dann nicht erkannt.
+        # Ist nur diese eine Stelle offen und die Hundertstelstelle gelesen,
+        # laesst sie sich aus der Zaehlung ergaenzen - die feineren Stellen
+        # kommen weiterhin aus dem Bild.
+        if (erwartet is not None and erste == 5
+                and all(z is not None for z in liste[:5])
+                and liste[6] is not None):
+            versuch = list(liste)
+            versuch[5] = int(erwartet / gewichte[5]) % 10
+            rest = next((i for i in range(6, len(versuch)) if versuch[i] is None),
+                        len(versuch))
+            if all(z is None for z in versuch[rest:]):
+                wert = sum(z * g for z, g in zip(versuch[:rest], gewichte))
+                if abs(wert - erwartet) <= 0.5:
+                    aufloesung = (10 * gewichte[rest] if rest < len(versuch)
+                                  else gewichte[-1])
+                    return versuch, wert, aufloesung
+        log("OCR verworfen (Luecke mitten drin):", liste)
         return None                                    # Luecke mitten drin
     return (liste,
             sum(z * g for z, g in zip(liste[:erste], gewichte)),
@@ -209,7 +233,7 @@ def main():
             letzte_ocr = stempel.stat().st_mtime if stempel.exists() else 0
             intervall = float((cfg.get("ocr") or {}).get("intervall_sekunden", 300))
             if time.time() - letzte_ocr > intervall:
-                ocr = ocr_ablesung(cfg)
+                ocr = ocr_ablesung(cfg, wert)
                 if ocr and ocr[1] is not None and ocr[2] <= 0.1:
                     gez, gelesen, aufloesung = ocr
                     komplett = aufloesung <= 0.0015

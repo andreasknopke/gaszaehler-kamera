@@ -339,6 +339,12 @@ den Zählerstand nach; die Differenz wird über die Ausfallzeit verteilt.
 * **Ablesung zeigt Striche** – die Ziffernvorlagen passen gerade nicht
   (Lichtwechsel, Kamera versetzt). Die Zählung läuft weiter; ein neuer
   Basiswert setzt die Bank zurück.
+* **In der Messtabelle steht `zahlwerk`** – der Wert stammt aus der
+  Ziffernrad-Zählung, nicht aus der OCR. Das ist kein Fehler: die Zählung
+  ist die Grundlage, die OCR korrigiert sie nur. Steht die Zehntelwalze
+  zwischen zwei Ziffern, wird sie aus der Zählung ergänzt; sind auch die
+  feinen Walzen unlesbar, bleibt es bei der Zählung (der Wert stimmt
+  trotzdem).
 * **Cron läuft nicht** – `crontab -l` muss enthalten:
   `*/2 * * * * cd .../verbrauch && /usr/bin/python3 sample.py >> logs/cron.log 2>&1`
   (Messung alle 5 Minuten – nötig, weil die 0,1‑m³‑Walze bei Verbrauch in

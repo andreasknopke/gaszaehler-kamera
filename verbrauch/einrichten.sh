@@ -36,7 +36,7 @@ if crontab -l 2>/dev/null | grep -q "kamera_waechter.py"; then
     echo "  vorhanden: */5 * * * * .../verbrauch/kamera_waechter.py"
 else
     { crontab -l 2>/dev/null
-      echo "*/5 * * * * cd $PWD && /usr/bin/python3 kamera_waechter.py >> logs/waechter.log 2>&1"
+      echo "*/5 * * * * cd $PWD && /usr/bin/python3 kamera_waechter.py >/dev/null 2>>logs/waechter.log"
     } | crontab -
     echo "  neu angelegt (Stream-Waechter alle 5 Minuten)"
 fi

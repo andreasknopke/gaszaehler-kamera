@@ -36,7 +36,7 @@ HW, HH = 12, 16          # halbe Fenstergroesse um eine gefundene Ziffer
 
 # Zuletzt gueltige Ziffernpositionen (Fallback, wenn die Suche scheitert).
 STANDARD_ZELLEN = [
-    (214, 741), (238, 741), (263, 739), (292, 737), (317, 735),
+    (220, 737), (247, 737), (271, 736), (299, 739), (325, 734),
 ]
 
 # Zeichen, die der Erkenner fuer Ziffern haeufig zurueckgibt
@@ -44,7 +44,7 @@ ZUORDNUNG = {
     "D": "0", "O": "0", "o": "0", "Q": "0", "U": "0",
     "I": "1", "l": "1", "|": "1", "i": "1",
     "Z": "2", "z": "2",
-    "E": "3",
+    "E": "3", "L": "1", "C": "0",
     "A": "4",
     "S": "5", "s": "5",
     "G": "6", "b": "6",
@@ -92,46 +92,66 @@ def ziffer_isolieren(b):
 
 
 def ziffern_finden(im):
-    """Ziffernzeile suchen: fuenf Ziffern mit gleichmaessigem Abstand."""
+    """Ziffernzeile suchen: fuenf Ziffern mit gleichmaessigem Abstand.
+
+    Ueber ein Spaltenprofil statt ueber zusammenhaengende Flaechen: Die
+    erste Ziffer klebt oft am dunklen Zaehlerrand, und Reflexe zerteilen
+    eine Ziffer in zwei Stuecke. Das Profil findet trotzdem fuenf Luecken
+    mit gleichmaessigem Abstand.
+    """
     x0, y0, x1, y1 = SUCHBEREICH
-    c = im.crop((x0, y0, x1, y1)).convert("L")
-    a = np.asarray(c, dtype=np.float32)
-    maske = ndimage.binary_closing(a < (np.percentile(a, 50) - 20), np.ones((2, 2)))
-    lbl, _ = ndimage.label(maske)
+    band_y0, band_y1 = y0 + 25, y1 - 30
+    band = im.crop((x0, band_y0, x1, band_y1)).convert("L")
+    a = np.asarray(band, dtype=np.float32)
+    hp = a - ndimage.uniform_filter(a, size=9)
+    profil = ndimage.uniform_filter1d((hp < -10).sum(axis=0).astype(float), 3)
+    lbl, _ = ndimage.label(profil >= 4)
+
     kandidaten = []
-    for k, sl in enumerate(ndimage.find_objects(lbl), 1):
+    for sl in ndimage.find_objects(lbl):
         if sl is None:
             continue
-        h = sl[0].stop - sl[0].start
-        w = sl[1].stop - sl[1].start
-        flaeche = int((lbl[sl] == k).sum())
-        if not (12 <= h <= 34 and 4 <= w <= 26 and flaeche > 40):
+        w = sl[0].stop - sl[0].start
+        if w < 5:
             continue
-        if not (1.1 <= h / max(w, 1) <= 3.6):
-            continue
-        kandidaten.append((sl[1].start + w // 2 + x0, sl[0].start + h // 2 + y0))
+        streifen = hp[:, sl[0].start:sl[0].stop]
+        zeilen = np.where((streifen < -10).any(axis=1))[0]
+        mitte_y = int(zeilen.mean()) + band_y0 if len(zeilen) else (band_y0 + band_y1) // 2
+        kandidaten.append((sl[0].start + w // 2 + x0, mitte_y))
     kandidaten.sort()
+    if not kandidaten:
+        return []
 
+    # Die Kamera haengt fest; meist genuegt es, die bekannte Zellenlage um
+    # die gemessene Verschiebung nachzuziehen. Das ist robuster als eine
+    # Kette zu suchen: die erste Ziffer klebt am Rand, rechts steht das "m".
+    verschiebungen, hoehen = [], []
+    for sx, sy in STANDARD_ZELLEN:
+        naechste = min(kandidaten, key=lambda k: abs(k[0] - sx))
+        if abs(naechste[0] - sx) <= 15:
+            verschiebungen.append(naechste[0] - sx)
+            hoehen.append(naechste[1] - sy)
+    if len(verschiebungen) >= 3:
+        dx = int(np.median(verschiebungen))
+        dy = int(np.median(hoehen))
+        return [(sx + dx, sy + dy) for sx, sy in STANDARD_ZELLEN]
+
+    # Sonst: Kette von fuenf Ziffern mit gleichmaessigem Abstand suchen.
     beste, beste_guete = [], -1e9
-    for i in range(len(kandidaten)):
-        gruppe = [kandidaten[i]]
-        for j in range(i + 1, len(kandidaten)):
-            if len(gruppe) == 5:
-                break
-            abstand = kandidaten[j][0] - gruppe[-1][0]
-            if 18 <= abstand <= 40 and abs(kandidaten[j][1] - gruppe[-1][1]) <= 12:
-                gruppe.append(kandidaten[j])
-        if len(gruppe) == 5:
-            abst = [gruppe[k + 1][0] - gruppe[k][0] for k in range(4)]
-            guete = min(abst) - max(abst)
-            if guete > beste_guete:
-                beste, beste_guete = gruppe, guete
+    for i in range(len(kandidaten) - 4):
+        gruppe = kandidaten[i:i + 5]
+        abst = [gruppe[k + 1][0] - gruppe[k][0] for k in range(4)]
+        if not all(20 <= d <= 34 for d in abst):
+            continue
+        if max(abs(y - gruppe[0][1]) for _, y in gruppe) > 12:
+            continue
+        guete = min(abst) - max(abst)
+        if guete > beste_guete:
+            beste, beste_guete = gruppe, guete
     return beste
 
 
-def zelle_lesen(ocr, im, x, y, hw, hh):
-    b = im.crop((x - hw, y - hh, x + hw, y + hh)).convert("L")
-    b = ziffer_isolieren(b) or b
+def _zelle_deuten(ocr, b):
     a = np.asarray(b, dtype=np.float32)
     if np.median(a) < 128:                     # dunkler Grund: invertieren
         b = ImageOps.invert(b)
@@ -152,6 +172,23 @@ def zelle_lesen(ocr, im, x, y, hw, hh):
         return None, 0.0
     zeichen = Counter(text).most_common(1)[0][0]
     return ZUORDNUNG.get(zeichen, zeichen), round(score, 3)
+
+
+def zelle_lesen(ocr, im, x, y, hw, hh):
+    b = im.crop((x - hw, y - hh, x + hw, y + hh)).convert("L")
+    b = ziffer_isolieren(b) or b
+    # Zwei Vorverarbeitungen: die "1" erkennt der Erkenner nur im Hochpass
+    # (helle Reflexe daneben), die "0" unter Reflexen dagegen nur ohne.
+    a = np.asarray(b, dtype=np.float32)
+    hp = a - ndimage.uniform_filter(a, size=7)
+    hp = (hp - hp.min()) / max(1e-6, hp.max() - hp.min()) * 255
+    varianten = [b, Image.fromarray(hp.astype(np.uint8))]
+    beste = (None, 0.0)
+    for variante in varianten:
+        z, s = _zelle_deuten(ocr, variante)
+        if s > beste[1]:
+            beste = (z, s)
+    return beste
 
 
 def lesen(im, ocr=None):

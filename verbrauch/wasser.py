@@ -201,7 +201,15 @@ def sammeln(cfg=None, erzwingen=False):
         basis = basiswert(con)
         ts_letzte, m3_letzte = letzte()
         bisher = m3_letzte if m3_letzte is not None else basis
-        wert, ziffern, scores, hinweis = stand_lesen(cfg, bisher)
+        # Das erste Bild nach dem Start des Viewers ist gelegentlich
+        # schlechter (Belichtung). Bei unplausibler Ablesung daher kurz
+        # warten und erneut lesen - der Lauf ist ohnehin nur taeglich.
+        for _ in range(3):
+            wert, ziffern, scores, hinweis = stand_lesen(cfg, bisher)
+            if wert is not None and (bisher is None
+                                     or 0 <= wert - bisher <= MAX_ANSTIEG):
+                break
+            time.sleep(2)
 
         if wert is None:
             notiz(con, f"{time.strftime('%H:%M')} Wasser: {hinweis}")

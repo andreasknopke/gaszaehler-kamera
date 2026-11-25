@@ -63,6 +63,22 @@ def durchfluss(con, fenster_minuten=60):
     return max(0.0, min(6.0, (m1 - m0) / ((t1 - t0) / 3600.0)))
 
 
+MAX_M3_PRO_MINUTE = 0.12                             # physikalische Obergrenze Gas
+
+
+def letzte_aenderung(con):
+    """Zeitpunkt, seit dem der gespeicherte Wert unveraendert ist."""
+    reihe = con.execute("SELECT ts, m3 FROM messungen ORDER BY ts DESC LIMIT 3000"
+                        ).fetchall()
+    if not reihe:
+        return None
+    wert = float(reihe[0][1])
+    for ts, m3 in reihe[1:]:
+        if abs(float(m3) - wert) > 1e-9:
+            return ts
+    return reihe[-1][0]
+
+
 def foto_noetig():
     fotos = sorted(FOTO_DIR.glob("zaehler-*.jpg"))
     return time.time() - (fotos[-1].stat().st_mtime if fotos else 0) > 3600
@@ -145,6 +161,14 @@ def main():
             return 0                                    # vorherige Messung laeuft noch
 
         cfg = gas.load_config()
+
+        # Steht das Kamerabild? Dann keine Messung speichern - sonst entstehen
+        # hunderte gleiche Werte und der Zaehler wirkt stehengeblieben.
+        alter = gas.bild_alter(cfg)
+        if alter is not None and alter > 180:
+            log(f"Kamerabild steht seit {alter / 60:.0f} min - keine Messung")
+            return 0
+
         con = gas.db()
         try:
             if tracker.basiswert(con) is None:
@@ -228,6 +252,14 @@ def main():
             toleranz = min(2.0, max(0.25, 3.0 * erwartet))
             unten = max(1.0, toleranz)
 
+            # Nach einem Ausfall (Bild stand, Stream weg) liegt die Ablesung
+            # weiter vorne, als es die kurze Zeitspanne erlaubt. Erlaubt ist,
+            # was der Zaehler seit der letzten *Aenderung* hoechstens gedreht
+            # haben kann - und nur, wenn die Ablesung bestaetigt ist.
+            ts_aend = letzte_aenderung(con)
+            stunden = (time.time() - ts_aend) / 3600.0 if ts_aend else 0.0
+            nachhol_max = min(30.0, MAX_M3_PRO_MINUTE * stunden * 60.0 + 0.25)
+
             if komplett:
                 if (gelesen < wert - 0.02 or gelesen > wert + toleranz) and not stabil:
                     # Ein Gaszaehler laeuft nicht rueckwaerts: eine einmalige
@@ -250,20 +282,24 @@ def main():
                     quelle = "ablesung"
             elif gelesen is not None and aufloesung <= 1.0:
                 abweichung = wert - gelesen
+                nachhol = (stabil and abweichung < 0
+                           and -abweichung <= nachhol_max)
                 if -0.0005 <= abweichung < aufloesung + 0.0005:
                     quelle = "ablesung"            # Ablesung bestaetigt die Zaehlung
-                elif -toleranz <= abweichung <= unten and (
-                        abweichung <= 0.02 or stabil):
-                    # Kleine Abweichung: auf die gelesene Stelle einrasten.
-                    # (Der Rahmen max(2*A, 1 m3) laesst Korrekturen bis zu
-                    # einem ganzen Kubikmeter zu, aber keine Sprünge durch
-                    # eine fehlgelesene höhere Stelle.)
+                elif nachhol or (-toleranz <= abweichung <= unten and (
+                        abweichung <= 0.02 or stabil)):
+                    # Kleine Abweichung oder bestaetigte Nachholung: auf die
+                    # gelesene Stelle einrasten.
                     neu = round(gelesen + min(max(abweichung, 0.0), aufloesung - 0.001), 3)
                     tracker.setze_basiswert(con, neu)
                     tracker.notiz(con, f"{time.strftime('%H:%M')} Zahlwerk {wert:.3f} "
                                        f"passt nicht zur Ablesung {ablesung}; "
                                        f"auf {neu:.3f} korrigiert")
-                    log(f"Zaehlung korrigiert: {wert:.3f} -> {neu:.3f} ({ablesung})")
+                    if nachhol:
+                        log(f"Nachholung nach Ausfall: {wert:.3f} -> {neu:.3f} "
+                            f"({ablesung}, Wert stand {stunden:.1f} h still)")
+                    else:
+                        log(f"Zaehlung korrigiert: {wert:.3f} -> {neu:.3f} ({ablesung})")
                     wert = neu
                     quelle = "ablesung"
                 else:

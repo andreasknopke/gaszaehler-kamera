@@ -230,8 +230,20 @@ def _deltas():
         reihe = con.execute("SELECT ts, m3, quelle FROM messungen ORDER BY ts").fetchall()
     finally:
         con.close()
-    return [(ts, diff) for _t0, ts, diff in
-            _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN, 0.12)]
+    deltas = []
+    for t0, t1, diff in _zuwaechse(reihe, 30.0, KORREKTUR_QUELLEN, 0.12):
+        if t1 - t0 <= 3600 or diff <= 0:
+            deltas.append((t1, diff))
+            continue
+        # Messluecke (z. B. Kamerastand): gleichmaessig auf Stunden verteilen,
+        # damit "heute"/"gestern" und die Rate stimmen.
+        stunde = 3600.0
+        t = t0
+        while t < t1:
+            ende = min(t + stunde, t1)
+            deltas.append((ende, diff * (ende - t) / (t1 - t0)))
+            t = ende
+    return deltas
 
 
 def serie(einheit, anzahl, tarif, zeitraum=None):
@@ -246,7 +258,7 @@ def serie(einheit, anzahl, tarif, zeitraum=None):
         reihe = con.execute("SELECT ts, m3, quelle FROM messungen ORDER BY ts").fetchall()
     finally:
         con.close()
-    for t0, t1, diff in _zuwaechse(reihe, 5.0, KORREKTUR_QUELLEN, 0.12):
+    for t0, t1, diff in _zuwaechse(reihe, 30.0, KORREKTUR_QUELLEN, 0.12):
         for schluessel, anteil in perioden_anteile(t0, t1, diff, einheit).items():
             pro_periode[schluessel] = pro_periode.get(schluessel, 0.0) + anteil
 

@@ -190,7 +190,8 @@ def stand_median(fallback=None):
     return werte[len(werte) // 2]
 
 
-def _stand_plausibel(wert, schluessel="mqtt_stand", pro_minute=VORWAERTS_PRO_MIN):
+def _stand_plausibel(wert, schluessel="mqtt_stand", pro_minute=VORWAERTS_PRO_MIN,
+                     max_sprung=30.0):
     """Plausiblen Zaehlerstand veroeffentlichen (weiches Klemmen).
 
     HA zaehlt bei einem total_increasing-Sensor Vorwaertsspruenge als
@@ -230,7 +231,21 @@ def _stand_plausibel(wert, schluessel="mqtt_stand", pro_minute=VORWAERTS_PRO_MIN
         minuten = max(2.0, (jetzt - ts_letzter) / 60.0)
         grenze = pro_minute * minuten + 0.25
         if wert > letzter + grenze:
-            return letzter                              # Fehlgriff nach oben
+            # Nach oben ist nur erlaubt, was sich beim naechsten Lauf
+            # bestaetigt (z. B. Nachholung nach einem Stream-Ausfall). Ein
+            # einmaliger Fehlgriff bleibt damit draussen.
+            kandidat = hole(f"{schluessel}_kandidat")
+            ts_kandidat = hole(f"{schluessel}_kandidat_ts")
+            if (kandidat is not None and abs(kandidat - wert) < 0.001
+                    and ts_kandidat is not None and jetzt - ts_kandidat <= 1200
+                    and wert - letzter <= max_sprung):
+                setze(f"{schluessel}_kandidat", "")
+                setze(f"{schluessel}_ok", wert)
+                setze(f"{schluessel}_ts", "%.0f" % jetzt)
+                return wert
+            setze(f"{schluessel}_kandidat", wert)
+            setze(f"{schluessel}_kandidat_ts", "%.0f" % jetzt)
+            return letzter                              # unbestaetigt
         if wert < letzter:
             # Nie rueckwaerts veroeffentlichen: Home Assistant macht aus
             # jedem Rueckgang ein negatives Delta (sichtbar als negativer
@@ -238,6 +253,7 @@ def _stand_plausibel(wert, schluessel="mqtt_stand", pro_minute=VORWAERTS_PRO_MIN
             # ueber den echten Zaehlerstand - der steigt ja weiter und holt
             # den veroeffentlichten Wert von selbst ein.
             return letzter
+        setze(f"{schluessel}_kandidat", "")
         setze(f"{schluessel}_ok", wert)
         setze(f"{schluessel}_ts", "%.0f" % jetzt)
         return wert
@@ -295,7 +311,8 @@ def wasser_werte():
     return {
         # Auch fuer Wasser nie rueckwaerts veroeffentlichen (negatives Delta
         # im HA-Energie-Dashboard). Hoechstens 0,10 m3/min sind plausibel.
-        "stand_m3": _stand_plausibel(zus.get("stand_m3"), "mqtt_wasser_stand", 0.10),
+        "stand_m3": _stand_plausibel(zus.get("stand_m3"), "mqtt_wasser_stand", 0.10,
+                                     max_sprung=5.0),
         "tag_m3": summe(86400),
         "leistung_aktuell_m3h": round(summe(1800) * 2, 3),
         "woche_m3": summe(7 * 86400),

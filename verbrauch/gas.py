@@ -182,6 +182,26 @@ def hole_bild(cfg=None):
     raise RuntimeError("Kamera nicht erreichbar: " + " | ".join(fehler))
 
 
+def bild_alter(cfg=None):
+    """Alter des Bildes im lokalen Viewer in Sekunden (None, wenn unbekannt).
+
+    Der Viewer haelt den Kamerastream offen. Bleibt er stehen (Kamera haengt
+    oder liefert nur Nullbytes), liefert /status das Alter des letzten echten
+    Bildes - damit laesst sich eine Messung verwerfen statt denselben Wert
+    hundertfach zu speichern.
+    """
+    cfg = cfg or load_config()
+    url = (cfg.get("kamera") or {}).get("url_ansicht") or ""
+    if "/" not in url:
+        return None
+    basis = url.rsplit("/", 1)[0]
+    try:
+        with urllib.request.urlopen(basis + "/status", timeout=3) as r:
+            return float(json.loads(r.read().decode("utf-8")).get("alter"))
+    except Exception:
+        return None
+
+
 def zaehlerbloecke(im):
     """Die beiden dunklen Zaehlerfenster als (x0, x1, y0, y1) finden."""
     a = np.asarray(im, dtype=np.float32)
